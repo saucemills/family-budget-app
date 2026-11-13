@@ -1,7 +1,7 @@
 //! The desktop app shell. Each `#[tauri::command]` here is a thin wrapper that the
 //! React UI calls with `invoke(...)`; the real logic lives in `budget-core`.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use budget_core::import::{self, CsvMapping, CsvPreview, ImportResult};
 use budget_core::models::*;
@@ -10,7 +10,10 @@ use budget_core::reflect::ReflectSummary;
 use budget_core::Budget;
 use tauri::{Manager, State};
 
-struct AppState(Mutex<Budget>);
+struct AppState(Arc<Mutex<Budget>>);
+
+mod bank;
+mod secrets;
 
 type CmdResult<T> = Result<T, String>;
 
@@ -124,13 +127,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let path = db_path(app.handle())?;
             if let Some(dir) = path.parent() {
                 std::fs::create_dir_all(dir)?;
             }
+            #[cfg(target_os = "linux")]
+            secrets::init(path.parent().unwrap().to_path_buf());
             let budget = Budget::open(&path)?;
-            app.manage(AppState(Mutex::new(budget)));
+            app.manage(AppState(Arc::new(Mutex::new(budget))));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -153,6 +159,19 @@ pub fn run() {
             copy_previous_assignments,
             reflect,
             database_path,
+            bank::plaid_get_settings,
+            bank::plaid_save_settings,
+            bank::plaid_list_items,
+            bank::plaid_connect_start,
+            bank::plaid_connect_poll,
+            bank::plaid_sandbox_connect,
+            bank::plaid_link_accounts,
+            bank::plaid_sync,
+            bank::plaid_disconnect,
+            bank::list_rules,
+            bank::add_rule,
+            bank::delete_rule,
+            bank::suggest_rule_text,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Family Budget");

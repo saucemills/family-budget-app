@@ -6,7 +6,9 @@ pub mod error;
 pub mod import;
 pub mod models;
 pub mod money;
+pub mod plaid;
 pub mod plan;
+pub mod rules;
 pub mod reflect;
 
 pub use db::Budget;

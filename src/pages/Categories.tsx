@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, Category, CategoryGroup, errorText } from "../api";
+import { api, bankApi, Category, CategoryGroup, Rule, errorText } from "../api";
 import { ConfirmButton, ErrorBanner } from "../components";
 
 export default function CategoriesPage() {
   const [groups, setGroups] = useState<CategoryGroup[]>([]);
+  const [rules, setRules] = useState<Rule[]>([]);
   const [newGroup, setNewGroup] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       setGroups(await api.listCategoryGroups());
+      setRules(await bankApi.listRules());
     } catch (e) {
       setError(errorText(e));
     }
@@ -53,6 +55,36 @@ export default function CategoriesPage() {
           <GroupCard key={g.id} group={g} run={run} />
         ))}
       </div>
+
+      <h2>Auto-categorize rules</h2>
+      <p className="muted">
+        New transactions whose payee contains the text go to that category. Create one by categorizing a transaction and
+        choosing "Make it a rule".
+      </p>
+      {rules.length === 0 ? (
+        <p className="empty">No rules yet.</p>
+      ) : (
+        <table>
+          <thead>
+            <tr>
+              <th>Payee contains</th>
+              <th>Category</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {rules.map((r) => (
+              <tr key={r.id}>
+                <td>{r.match_text}</td>
+                <td>{r.category_name}</td>
+                <td>
+                  <ConfirmButton label="Delete" confirmLabel="Sure?" onConfirm={() => run(() => bankApi.deleteRule(r.id))} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

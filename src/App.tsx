@@ -7,8 +7,9 @@ import ImportPage from "./pages/Import";
 import PlanPage from "./pages/Plan";
 import ReflectPage from "./pages/Reflect";
 import UpdateBanner from "./UpdateBanner";
+import BanksPage from "./pages/Banks";
 
-type Page = "plan" | "reflect" | "transactions" | "accounts" | "categories" | "import";
+type Page = "banks" | "plan" | "reflect" | "transactions" | "accounts" | "categories" | "import";
 
 const NAV: { id: Page; label: string }[] = [
   { id: "plan", label: "Plan" },
@@ -17,6 +18,7 @@ const NAV: { id: Page; label: string }[] = [
   { id: "accounts", label: "Accounts" },
   { id: "categories", label: "Categories" },
   { id: "import", label: "Import" },
+  { id: "banks", label: "Bank sync" },
 ];
 
 export default function App() {
@@ -51,6 +53,7 @@ export default function App() {
         {page === "transactions" && <TransactionsPage />}
         {page === "accounts" && <AccountsPage />}
         {page === "categories" && <CategoriesPage />}
+        {page === "banks" && <BanksPage />}
         {page === "import" && <ImportPage onDone={() => setPage("transactions")} />}
       </main>
     </div>

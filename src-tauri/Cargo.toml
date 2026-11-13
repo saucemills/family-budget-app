@@ -16,5 +16,9 @@ budget-core = { path = "../crates/budget-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tauri = "2.12.5"
+tauri-plugin-opener = "2.7.3"
 tauri-plugin-process = "2.4.0"
 tauri-plugin-updater = "2.14.1"
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+keyring = { version = "3", features = ["windows-native", "apple-native"] }

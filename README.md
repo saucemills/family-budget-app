@@ -9,6 +9,8 @@ Built with [Tauri](https://tauri.app) (a Rust backend with a React interface).
 
 - **Plan:** a YNAB-style monthly budget. Money in income categories becomes "Ready to Assign"; you assign it to categories each month, see what's available, and leftovers roll forward. Overspending is taken out of next month's Ready to Assign. "Copy last month's amounts" fills in a new month quickly.
 - **Reflect:** "where did the money go" for any date range: totals for money in, out and left over, a Sankey diagram (income → groups → categories) with hover details, and a spending table you can expand by category.
+- **Bank sync (Plaid):** connect banks and cards on Plaid's own sign-in page; new, changed and removed transactions come in when you click Sync. Pending charges are picked up once they post. Linking a bank account to an account that already has CSV history only imports newer transactions. Plaid keys and connection tokens are kept in Windows Credential Manager (macOS Keychain; a private file on Linux), never in the budget file.
+- **Auto-categorize:** after you categorize a transaction the app offers to make a rule ("payees containing STARBUCKS → Coffee"). Rules run on every import; when no rule matches, Plaid's own category guess fills in starter categories.
 - **Accounts:** checking, savings, credit cards and cash, with running balances.
 - **Categories:** groups of categories (Food → Groceries, Restaurants, Coffee…), seeded with a starter set you can rename, hide or add to.
 - **Transactions:** add them by hand, search, filter by account or "needs a category", and categorize each one.
@@ -19,7 +21,7 @@ Built with [Tauri](https://tauri.app) (a Rust backend with a React interface).
 1. ~~App setup, local database, CSV import~~
 2. ~~Plan and Reflect~~
 3. ~~Windows installer with in-app updates~~
-4. Plaid bank syncing and auto-categorization rules
+4. ~~Plaid bank syncing and auto-categorization rules~~
 5. Everyday polish: review queue, split transactions, backups
 
 ## Installing
@@ -45,6 +47,15 @@ Updates are signed with a private key stored as the `TAURI_SIGNING_PRIVATE_KEY` 
 secret; the matching public key is in `src-tauri/tauri.conf.json`. If the private key is
 ever lost, generate a new pair (`npx tauri signer generate`), update both, and install the
 next version by hand once.
+
+## Setting up bank sync
+
+1. Sign up at [dashboard.plaid.com](https://dashboard.plaid.com/signup) and choose the free **Trial** plan
+   (real banks, up to 10 bank logins; removing one doesn't free its slot).
+2. Copy your **client ID** and **Production secret** from Developers → Keys.
+3. In the app, open **Bank sync**, paste them in, and click **Connect a bank**.
+
+To try it safely first, use the **Sandbox** secret and **Connect test bank** (a fake bank).
 
 ## Developing on Windows
 
