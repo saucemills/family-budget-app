@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, bankApi, Category, CategoryGroup, Rule, errorText } from "../api";
+import { api, bankApi, Category, CategoryGroup, Rule, describeRange, errorText } from "../api";
 import { ConfirmButton, ErrorBanner } from "../components";
 
 export default function CategoriesPage() {
@@ -59,7 +59,8 @@ export default function CategoriesPage() {
       <h2>Auto-categorize rules</h2>
       <p className="muted">
         New transactions whose payee contains the text go to that category. Create one by categorizing a transaction and
-        choosing "Make it a rule".
+        choosing "Make it a rule". A rule can be limited to an amount range, so one payee can go to different categories
+        depending on the size of the charge.
       </p>
       {rules.length === 0 ? (
         <p className="empty">No rules yet.</p>
@@ -68,6 +69,7 @@ export default function CategoriesPage() {
           <thead>
             <tr>
               <th>Payee contains</th>
+              <th>Amount</th>
               <th>Category</th>
               <th />
             </tr>
@@ -76,6 +78,7 @@ export default function CategoriesPage() {
             {rules.map((r) => (
               <tr key={r.id}>
                 <td>{r.match_text}</td>
+                <td className="muted">{describeRange(r.min_cents, r.max_cents)}</td>
                 <td>{r.category_name}</td>
                 <td>
                   <ConfirmButton label="Delete" confirmLabel="Sure?" onConfirm={() => run(() => bankApi.deleteRule(r.id))} />

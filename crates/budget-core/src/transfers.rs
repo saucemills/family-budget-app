@@ -53,6 +53,12 @@ fn squash(s: &str) -> String {
     s.chars().filter(|c| c.is_ascii_alphanumeric()).map(|c| c.to_ascii_lowercase()).collect()
 }
 
+/// Card and loan statements label incoming payments like "AUTOPAY PAYMENT - THANK YOU",
+/// "ONLINE PYMT", "MOBILE PMT". `payee` is already squashed.
+fn looks_like_payment(payee: &str) -> bool {
+    ["payment", "pymt", "pmt", "thankyou", "autopay"].iter().any(|w| payee.contains(w))
+}
+
 impl Budget {
     fn transfer_category(&self, name: &str) -> Result<Option<i64>> {
         let mut stmt = self.conn.prepare(
@@ -128,9 +134,12 @@ impl Budget {
         // Same bank (or a hand-entered account): an amount and date match is enough. Between
         // two different banks, one side must name the other, or any two equal amounts a few
         // days apart (a card payment and someone else's deposit) would look like a transfer.
+        // A card or loan receiving a "payment" is paid from one of your accounts, even though
+        // neither side names the other bank ("Amex Epayment" vs "PAYMENT - THANK YOU").
         let plausible_pair = |out: &Row, inn: &Row| -> bool {
             out.item.is_none() || inn.item.is_none() || out.item == inn.item
                 || names_institution(out, inn.item) || names_institution(inn, out.item)
+                || (matches!(inn.kind, AccountKind::CreditCard | AccountKind::Loan) && looks_like_payment(&inn.payee))
         };
 
         let mut used: HashSet<i64> = HashSet::new();
@@ -347,6 +356,16 @@ mod tests {
         b.detect_transfers().unwrap();
         assert_eq!(get(&b, amex).category_name, None);
         assert_eq!(get(&b, to_sofi).linked_transaction_id, Some(at_sofi));
+
+        // A card payment pairs with the card once the card is connected, though neither names the other.
+        let amex_card = b.create_account("American Express Gold Card", AccountKind::CreditCard).unwrap();
+        link_to_item(&b, amex_card, "i3", "American Express");
+        let thanks = add(&b, amex_card, "2025-09-03", "ONLINE PAYMENT - THANK YOU", 2_000);
+        let refund = add(&b, amex_card, "2025-09-02", "Whole Foods refund", 2_000);
+        b.detect_transfers().unwrap();
+        assert_eq!(get(&b, amex).linked_transaction_id, Some(thanks));
+        assert_eq!(get(&b, amex).category_name.as_deref(), Some(CARD_PAYMENT));
+        assert_eq!(get(&b, refund).linked_transaction_id, None);
         assert_eq!(get(&b, from_usb).category_name.as_deref(), Some(BETWEEN_ACCOUNTS));
         assert_eq!(get(&b, own_fee).category_name, None);
         assert_eq!(get(&b, boa).category_name, None);

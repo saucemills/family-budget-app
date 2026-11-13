@@ -111,6 +111,25 @@ ALTER TABLE transactions ADD COLUMN category_auto INTEGER NOT NULL DEFAULT 0;
 UPDATE transactions SET category_auto = 1 WHERE source = 'plaid' AND category_id IS NOT NULL;
 -- Fetch every bank transaction once more so Plaid's categories get stored.
 UPDATE plaid_items SET cursor = NULL;
+
+-- Rules can be limited to an amount range ("TESLA" from $120 to $250 is insurance), so the
+-- same payee text can appear in several rules. Amounts are positive cents, either direction.
+CREATE TABLE category_rules_v2 (
+    id          INTEGER PRIMARY KEY,
+    match_text  TEXT NOT NULL COLLATE NOCASE,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    min_cents   INTEGER,
+    max_cents   INTEGER,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT INTO category_rules_v2 (id, match_text, category_id, created_at)
+    SELECT id, match_text, category_id, created_at FROM category_rules;
+DROP TABLE category_rules;
+ALTER TABLE category_rules_v2 RENAME TO category_rules;
+
+-- Insurance shows up in real budgets; older budgets get it too.
+INSERT OR IGNORE INTO categories (group_id, name, sort_order)
+    SELECT id, 'Car Insurance', 3 FROM category_groups WHERE name = 'Transportation';
 "#];
 
 /// Starter categories, loosely shaped like a typical family's spending.
@@ -119,7 +138,7 @@ const DEFAULT_CATEGORIES: &[(&str, bool, &[&str])] = &[
     ("Income", true, &["Paycheck", "Other Income"]),
     ("Housing", false, &["Rent / Mortgage", "Utilities", "Home Maintenance"]),
     ("Food", false, &["Groceries", "Restaurants", "Coffee"]),
-    ("Transportation", false, &["Gas", "Car Maintenance", "Rideshare / Transit"]),
+    ("Transportation", false, &["Gas", "Car Maintenance", "Rideshare / Transit", "Car Insurance"]),
     ("Health", false, &["Medical", "Pharmacy"]),
     ("Entertainment", false, &["Subscriptions", "Fun Money"]),
     ("Travel", false, &["Flights", "Lodging"]),

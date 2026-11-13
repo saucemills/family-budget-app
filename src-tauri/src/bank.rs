@@ -238,8 +238,14 @@ pub fn list_rules(state: State<AppState>) -> CmdResult<Vec<Rule>> {
 }
 
 #[tauri::command]
-pub fn add_rule(state: State<AppState>, match_text: String, category_id: i64) -> CmdResult<usize> {
-    lock(&state.0)?.add_rule(&match_text, category_id).map_err(|e| e.to_string())
+pub fn add_rule(
+    state: State<AppState>,
+    match_text: String,
+    category_id: i64,
+    min_cents: Option<i64>,
+    max_cents: Option<i64>,
+) -> CmdResult<usize> {
+    lock(&state.0)?.add_ranged_rule(&match_text, category_id, min_cents, max_cents).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

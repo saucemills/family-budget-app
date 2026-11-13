@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, bankApi, describeSync, Account, CategoryGroup, Transaction, errorText, formatMoney, parseMoney, today } from "../api";
+import { api, bankApi, describeRange, describeSync, Account, CategoryGroup, Transaction, errorText, formatMoney, parseMoney, today } from "../api";
 import { CategorySelect, ConfirmButton, ErrorBanner } from "../components";
+
+interface RulePrompt {
+  text: string;
+  categoryId: number;
+  categoryName: string;
+  /** Limit the rule to an amount range. */
+  limit: boolean;
+  min: string;
+  max: string;
+  /** The amount of the transaction just categorized, to pre-fill the range. */
+  example: number;
+}
 
 export default function TransactionsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -13,7 +25,7 @@ export default function TransactionsPage() {
   const [hasBanks, setHasBanks] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [rulePrompt, setRulePrompt] = useState<{ text: string; categoryId: number; categoryName: string } | null>(null);
+  const [rulePrompt, setRulePrompt] = useState<RulePrompt | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -52,10 +64,17 @@ export default function TransactionsPage() {
 
   const createRule = async () => {
     if (!rulePrompt) return;
+    const min = rulePrompt.limit && rulePrompt.min.trim() ? parseMoney(rulePrompt.min) : null;
+    const max = rulePrompt.limit && rulePrompt.max.trim() ? parseMoney(rulePrompt.max) : null;
+    if ((rulePrompt.limit && rulePrompt.min.trim() && min == null) || (rulePrompt.limit && rulePrompt.max.trim() && max == null)) {
+      setError("Enter amounts like 120 or 249.99");
+      return;
+    }
     try {
-      const n = await bankApi.addRule(rulePrompt.text, rulePrompt.categoryId);
+      const n = await bankApi.addRule(rulePrompt.text, rulePrompt.categoryId, min, max);
+      const range = min != null || max != null ? ` (${describeRange(min && Math.abs(min), max && Math.abs(max))})` : "";
       setNotice(
-        `Rule saved: payees containing "${rulePrompt.text}" go to ${rulePrompt.categoryName}.` +
+        `Rule saved: payees containing "${rulePrompt.text}"${range} go to ${rulePrompt.categoryName}.` +
           (n ? ` It also categorized ${n} more transaction${n === 1 ? "" : "s"}.` : ""),
       );
       setRulePrompt(null);
@@ -71,7 +90,15 @@ export default function TransactionsPage() {
       await load();
       if (categoryId != null) {
         const name = groups.flatMap((g) => g.categories).find((c) => c.id === categoryId)?.name ?? "";
-        setRulePrompt({ text: await bankApi.suggestRuleText(t.payee), categoryId, categoryName: name });
+        setRulePrompt({
+          text: await bankApi.suggestRuleText(t.payee),
+          categoryId,
+          categoryName: name,
+          limit: false,
+          min: "",
+          max: "",
+          example: Math.abs(t.amount_cents),
+        });
       }
     } catch (e) {
       setError(errorText(e));
@@ -129,6 +156,27 @@ export default function TransactionsPage() {
           Always put payees containing{" "}
           <input value={rulePrompt.text} onChange={(e) => setRulePrompt({ ...rulePrompt, text: e.target.value })} /> in{" "}
           <strong>{rulePrompt.categoryName}</strong>?{" "}
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={rulePrompt.limit}
+              onChange={(e) =>
+                setRulePrompt({
+                  ...rulePrompt,
+                  limit: e.target.checked,
+                  min: rulePrompt.min || (rulePrompt.example / 100).toFixed(2),
+                  max: rulePrompt.max || (rulePrompt.example / 100).toFixed(2),
+                })
+              }
+            />
+            only for amounts
+          </label>
+          {rulePrompt.limit && (
+            <>
+              {" "}from $<input className="amount" value={rulePrompt.min} onChange={(e) => setRulePrompt({ ...rulePrompt, min: e.target.value })} />{" "}
+              to $<input className="amount" value={rulePrompt.max} onChange={(e) => setRulePrompt({ ...rulePrompt, max: e.target.value })} />
+            </>
+          )}{" "}
           <button className="primary" onClick={createRule}>
             Make it a rule
           </button>{" "}

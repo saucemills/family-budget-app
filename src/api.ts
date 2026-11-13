@@ -279,6 +279,18 @@ export interface Rule {
   match_text: string;
   category_id: number;
   category_name: string;
+  /** Only amounts at least this big (positive cents, in or out). */
+  min_cents: number | null;
+  max_cents: number | null;
+}
+
+/** "any amount", "$120.00 to $250.00", "up to $100.00", "$500.00 or more" */
+export function describeRange(min: number | null, max: number | null): string {
+  const m = (c: number) => formatMoney(c);
+  if (min != null && max != null) return `${m(min)} to ${m(max)}`;
+  if (max != null) return `up to ${m(max)}`;
+  if (min != null) return `${m(min)} or more`;
+  return "any amount";
 }
 
 export const bankApi = {
@@ -295,7 +307,8 @@ export const bankApi = {
   disconnect: (item: number) => invoke<void>("plaid_disconnect", { item }),
 
   listRules: () => invoke<Rule[]>("list_rules"),
-  addRule: (matchText: string, categoryId: number) => invoke<number>("add_rule", { matchText, categoryId }),
+  addRule: (matchText: string, categoryId: number, minCents: number | null = null, maxCents: number | null = null) =>
+    invoke<number>("add_rule", { matchText, categoryId, minCents, maxCents }),
   deleteRule: (id: number) => invoke<void>("delete_rule", { id }),
   suggestRuleText: (payee: string) => invoke<string>("suggest_rule_text", { payee }),
 };

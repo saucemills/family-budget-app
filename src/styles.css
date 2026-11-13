@@ -194,3 +194,5 @@ ul.plain { list-style: none; padding: 0; margin: 0 0 8px; }
 ul.plain li { padding: 2px 0; }
 .small { font-size: 12px; }
 .rule-prompt input { width: 180px; padding: 3px 6px; }
+.rule-prompt input.amount { width: 80px; }
+.rule-prompt label.check { margin-left: 6px; }
