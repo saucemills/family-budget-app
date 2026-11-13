@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Family Budget",
-  "version": "0.1.0",
+  "version": "../package.json",
   "identifier": "app.familybudget.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -11,13 +11,47 @@
   },
   "app": {
     "windows": [
-      { "title": "Family Budget", "width": 1200, "height": 800, "minWidth": 900, "minHeight": 600 }
+      {
+        "title": "Family Budget",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600
+      }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true,
+    "shortDescription": "Family Budget",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEMxNTBCOTJGQTZGMkMyMUMKUldRY3d2S21MN2xRd1N6czVpeG1wR3FyRlpxYnZyY0FVNDdlVkdSZWUxbnJDUWZLL3JLdzRuM3cK",
+      "endpoints": [
+        "https://github.com/saucemills/family-budget-app/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

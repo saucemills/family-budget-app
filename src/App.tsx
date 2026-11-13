@@ -6,6 +6,7 @@ import CategoriesPage from "./pages/Categories";
 import ImportPage from "./pages/Import";
 import PlanPage from "./pages/Plan";
 import ReflectPage from "./pages/Reflect";
+import UpdateBanner from "./UpdateBanner";
 
 type Page = "plan" | "reflect" | "transactions" | "accounts" | "categories" | "import";
 
@@ -35,6 +36,7 @@ export default function App() {
             {n.label}
           </button>
         ))}
+        <UpdateBanner />
         {dbPath && (
           <div className="db-path" title={dbPath}>
             Your data is saved on this computer at

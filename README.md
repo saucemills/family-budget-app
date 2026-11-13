@@ -18,11 +18,35 @@ Built with [Tauri](https://tauri.app) (a Rust backend with a React interface).
 
 1. ~~App setup, local database, CSV import~~
 2. ~~Plan and Reflect~~
-3. Windows installer with in-app updates
+3. ~~Windows installer with in-app updates~~
 4. Plaid bank syncing and auto-categorization rules
 5. Everyday polish: review queue, split transactions, backups
 
-## Running it on Windows
+## Installing
+
+Download the latest `Family Budget_x.y.z_x64-setup.exe` from
+[Releases](https://github.com/saucemills/family-budget-app/releases/latest) and run it.
+It installs for your Windows user (no admin needed) and adds Family Budget to the Start menu.
+
+When a new version is published, the app shows **Update and restart** at the bottom of
+its sidebar. Updates replace the app only; your budget file is kept.
+
+Windows may show "Windows protected your PC" the first time, because the installer isn't
+signed with a paid code-signing certificate. Click **More info → Run anyway**.
+
+### Publishing a new version
+
+1. Bump `"version"` in `package.json` (e.g. `0.2.0`) and merge it to `main`.
+2. Tag that commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
+3. The **Windows build** workflow builds the installer, signs the update, and publishes
+   the release. Installed copies pick it up the next time they open.
+
+Updates are signed with a private key stored as the `TAURI_SIGNING_PRIVATE_KEY` repository
+secret; the matching public key is in `src-tauri/tauri.conf.json`. If the private key is
+ever lost, generate a new pair (`npx tauri signer generate`), update both, and install the
+next version by hand once.
+
+## Developing on Windows
 
 One-time setup:
 
