@@ -50,6 +50,14 @@ CREATE TABLE transactions (
 );
 CREATE INDEX transactions_date ON transactions(date);
 CREATE INDEX transactions_category ON transactions(category_id);
+"#, r#"
+-- Plan: how much was assigned to each category in each month.
+CREATE TABLE budget_assignments (
+    month          TEXT NOT NULL,            -- YYYY-MM
+    category_id    INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    assigned_cents INTEGER NOT NULL,
+    PRIMARY KEY (month, category_id)
+);
 "#];
 
 /// Starter categories, loosely shaped like a typical family's spending.

@@ -131,3 +131,78 @@ export const today = () => {
 };
 
 export const errorText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : String(e));
+
+// ---------- Plan ----------
+
+export interface PlanCategory {
+  id: number;
+  name: string;
+  assigned_cents: number;
+  activity_cents: number;
+  available_cents: number;
+}
+
+export interface PlanGroup {
+  id: number;
+  name: string;
+  assigned_cents: number;
+  activity_cents: number;
+  available_cents: number;
+  categories: PlanCategory[];
+}
+
+export interface MonthPlan {
+  month: string;
+  ready_to_assign_cents: number;
+  income_this_month_cents: number;
+  assigned_this_month_cents: number;
+  overspent_last_month_cents: number;
+  groups: PlanGroup[];
+  uncategorized_count: number;
+}
+
+// ---------- Reflect ----------
+
+export interface ReflectSummary {
+  start: string;
+  end: string;
+  income_cents: number;
+  spending_cents: number;
+  income_sources: { category_id: number; name: string; amount_cents: number }[];
+  spending_groups: {
+    group_id: number;
+    name: string;
+    sort_order: number;
+    amount_cents: number;
+    categories: { category_id: number; name: string; amount_cents: number }[];
+  }[];
+  uncategorized_count: number;
+  uncategorized_out_cents: number;
+  color_order: number[];
+}
+
+export const planApi = {
+  getMonthPlan: (month: string) => invoke<MonthPlan>("get_month_plan", { month }),
+  setAssigned: (month: string, categoryId: number, cents: number) =>
+    invoke<void>("set_assigned", { month, categoryId, cents }),
+  copyPreviousAssignments: (month: string) => invoke<number>("copy_previous_assignments", { month }),
+  reflect: (start: string, end: string) => invoke<ReflectSummary>("reflect", { start, end }),
+};
+
+export const isoDate = (d: Date) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+export const thisMonth = () => today().slice(0, 7);
+
+export function shiftMonth(month: string, delta: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  return isoDate(d).slice(0, 7);
+}
+
+export const monthLabel = (month: string) => {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+};
