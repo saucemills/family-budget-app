@@ -65,6 +65,9 @@ button.danger { color: var(--muted); border-color: transparent; background: none
 button.danger:hover, button.danger.armed { color: var(--out); border-color: var(--out); }
 .add-row, .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
 .add-row input:not([type]), .toolbar input:not([type]) { min-width: 200px; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--accent); }
+.sort-arrow { font-size: 10px; }
 input.amount { width: 100px; text-align: right; }
 label.check { display: flex; gap: 6px; align-items: center; }
 
