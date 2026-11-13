@@ -30,8 +30,32 @@ Download the latest `Family Budget_x.y.z_x64-setup.exe` from
 [Releases](https://github.com/saucemills/family-budget-app/releases/latest) and run it.
 It installs for your Windows user (no admin needed) and adds Family Budget to the Start menu.
 
-When a new version is published, the app shows **Update and restart** at the bottom of
-its sidebar. Updates replace the app only; your budget file is kept.
+The app looks for a new version when it opens and every few hours while it's open, and
+**Check for updates** at the bottom of the sidebar checks right away. When one is found it
+shows **Update and restart**. Updates replace the app only; your budget file is kept.
+
+## Transfers
+
+Money moving between your own accounts isn't income or spending, so it goes to the
+**Transfers** group, which Plan and Reflect leave out. The app matches these itself:
+
+- **Paid through another account:** a bank charge like `Web Authorized Pmt Paypal` is paired
+  with the PayPal purchase it paid for, when PayPal is connected too. The purchase keeps its
+  real category, so the spending is counted once, under what was bought.
+- **Between my accounts / Credit card payment / Loan payment:** the same amount leaving one
+  account and arriving in another within 4 days. Between two different banks, one side has
+  to name the other bank (`US BANK NA` arriving at SoFi), or the money has to land in a
+  connected card or loan as a payment (`PAYMENT - THANK YOU`).
+- Money arriving from another bank you've connected, whose other half is older than that
+  bank's history.
+
+Only transactions that are uncategorized, or that the app categorized itself, are matched.
+A category you pick is never changed, and picking a non-transfer category undoes a match.
+Rules ("payees containing TESLA go to Car Insurance") can be limited to an amount range, so
+one payee can go to different categories depending on the size of the charge.
+
+Payments to cards or loans that aren't connected are left for you to categorize, since
+they're the only record of that spending.
 
 Windows may show "Windows protected your PC" the first time, because the installer isn't
 signed with a paid code-signing certificate. Click **More info → Run anyway**.

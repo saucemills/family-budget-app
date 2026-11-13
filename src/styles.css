@@ -177,6 +177,10 @@ tr.clickable { cursor: pointer; }
 .update-available { background: var(--accent-soft); border-radius: 8px; padding: 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px; }
 .update-title { font-weight: 600; font-size: 13px; }
 .version { font-size: 11px; color: var(--muted); }
+.update-check { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; font-size: 12px; }
+.update-check button.link { align-self: flex-start; }
+.update-check .detail { display: block; font-size: 11px; word-break: break-word; opacity: 0.8; }
+.memo.linked { color: var(--accent); }
 .db-path { margin-top: 0; }
 
 /* ---------- bank sync ---------- */
@@ -190,3 +194,5 @@ ul.plain { list-style: none; padding: 0; margin: 0 0 8px; }
 ul.plain li { padding: 2px 0; }
 .small { font-size: 12px; }
 .rule-prompt input { width: 180px; padding: 3px 6px; }
+.rule-prompt input.amount { width: 80px; }
+.rule-prompt label.check { margin-left: 6px; }

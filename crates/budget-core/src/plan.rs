@@ -96,6 +96,7 @@ impl Budget {
             .prepare(
                 "SELECT c.id, c.group_id, c.name, c.hidden, g.is_income
                  FROM categories c JOIN category_groups g ON g.id = c.group_id
+                 WHERE g.is_transfer = 0
                  ORDER BY g.sort_order, g.id, c.sort_order, c.id",
             )?
             .query_map([], |r| {

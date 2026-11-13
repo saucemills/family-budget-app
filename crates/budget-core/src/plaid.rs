@@ -55,6 +55,17 @@ pub struct PlaidAccount {
     pub account_type: String,
     #[serde(default)]
     pub subtype: Option<String>,
+    #[serde(default)]
+    pub balances: Option<PlaidBalances>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PlaidBalances {
+    /// For cards and loans, the amount owed (positive).
+    #[serde(default)]
+    pub current: Option<f64>,
+    #[serde(default)]
+    pub available: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -293,10 +304,14 @@ pub struct SyncResult {
     pub auto_categorized: usize,
 }
 
-/// Plaid's spending categories mapped to the starter categories, by name. Used only when
-/// no rule matched, and only if a category with that name still exists.
-fn pfc_category_name(pfc: &PersonalFinanceCategory) -> Option<&'static str> {
-    let d = pfc.detailed.as_str();
+/// Plaid's spending categories (`personal_finance_category.detailed`) mapped to the
+/// starter categories, by name. Used only when no rule or transfer match applied, and only
+/// if a category with that name still exists.
+///
+/// Credit card and loan payments are deliberately left out: when the card or loan isn't
+/// linked, the payment is the only trace of that spending, so the family should decide.
+pub fn pfc_category_name(detailed: &str) -> Option<&'static str> {
+    let d = detailed;
     Some(match d {
         "FOOD_AND_DRINK_GROCERIES" => "Groceries",
         "FOOD_AND_DRINK_COFFEE" => "Coffee",
@@ -311,19 +326,23 @@ fn pfc_category_name(pfc: &PersonalFinanceCategory) -> Option<&'static str> {
         "TRAVEL_FLIGHTS" => "Flights",
         "TRAVEL_LODGING" => "Lodging",
         "INCOME_WAGES" => "Paycheck",
-        _ => match pfc.primary.as_str() {
-            "RENT_AND_UTILITIES" => "Utilities",
-            "MEDICAL" => "Medical",
-            "GENERAL_MERCHANDISE" => "Shopping",
-            "INCOME" => "Other Income",
-            _ => return None,
-        },
+        "TRANSFER_IN_SAVINGS"
+        | "TRANSFER_OUT_SAVINGS"
+        | "TRANSFER_IN_INVESTMENT_AND_RETIREMENT_FUNDS"
+        | "TRANSFER_OUT_INVESTMENT_AND_RETIREMENT_FUNDS" => crate::transfers::BETWEEN_ACCOUNTS,
+        _ if d.starts_with("RENT_AND_UTILITIES_") => "Utilities",
+        _ if d.starts_with("MEDICAL_") => "Medical",
+        _ if d.starts_with("GENERAL_MERCHANDISE_") => "Shopping",
+        _ if d.starts_with("INCOME_") => "Other Income",
+        _ => return None,
     })
 }
 
 fn account_kind(a: &PlaidAccount) -> AccountKind {
     match (a.account_type.as_str(), a.subtype.as_deref()) {
         ("credit", _) => AccountKind::CreditCard,
+        ("investment" | "brokerage", _) => AccountKind::Investment,
+        ("loan", _) => AccountKind::Loan,
         ("depository", Some("savings" | "money market" | "cd")) => AccountKind::Savings,
         _ => AccountKind::Checking,
     }
@@ -399,9 +418,15 @@ impl Budget {
             None => {
                 let institution: String =
                     self.conn.query_row("SELECT institution_name FROM plaid_items WHERE id = ?1", [item_db_id], |r| r.get(0))?;
+                // "SoFi Savings" stays as is; "Checking" becomes "U.S. Bank Checking".
+                let label = if a.name.to_lowercase().starts_with(&institution.to_lowercase()) {
+                    a.name.clone()
+                } else {
+                    format!("{institution} {}", a.name).trim().to_string()
+                };
                 let base = match &a.mask {
-                    Some(m) if !m.is_empty() => format!("{institution} {} ••{m}", a.name),
-                    _ => format!("{institution} {}", a.name),
+                    Some(m) if !m.is_empty() && !label.ends_with(m.as_str()) => format!("{label} ••{m}"),
+                    _ => label,
                 };
                 // Account names are unique; add a number if needed.
                 let mut name = base.clone();
@@ -453,6 +478,23 @@ impl Budget {
             let name: String = self.conn.query_row("SELECT name FROM accounts WHERE id = ?1", [id], |r| r.get(0))?;
             result.new_accounts.push(name);
         }
+        // The bank's own balance, and a better account type than older versions guessed.
+        for a in &accounts {
+            let kind = account_kind(a);
+            let balance = a.balances.as_ref().and_then(|b| b.current).map(|cur| {
+                let cents = (cur * 100.0).round() as i64;
+                // Plaid reports what's owed on cards and loans as a positive number.
+                if matches!(kind, AccountKind::CreditCard | AccountKind::Loan) { -cents } else { cents }
+            });
+            self.conn.execute(
+                "UPDATE accounts SET
+                     kind = CASE WHEN kind = 'checking' THEN ?2 ELSE kind END,
+                     bank_balance_cents = COALESCE(?3, bank_balance_cents),
+                     bank_balance_at = CASE WHEN ?3 IS NULL THEN bank_balance_at ELSE datetime('now') END
+                 WHERE plaid_account_id = ?1",
+                params![a.account_id, kind.as_str(), balance],
+            )?;
+        }
 
         // Fetch all pages first; if Plaid's data changes mid-way, start over (Plaid's documented recovery).
         let start_cursor: Option<String> =
@@ -490,15 +532,18 @@ impl Budget {
             }
         }
 
-        let mut pfc_guesses: Vec<(i64, &'static str)> = Vec::new();
         let tx = self.conn.transaction()?;
         {
             let mut find = tx.prepare("SELECT id FROM transactions WHERE account_id = ?1 AND import_id = ?2")?;
             let mut insert = tx.prepare(
-                "INSERT INTO transactions (account_id, date, payee, amount_cents, source, import_id)
-                 VALUES (?1, ?2, ?3, ?4, 'plaid', ?5)",
+                "INSERT INTO transactions (account_id, date, payee, amount_cents, source, import_id, plaid_category)
+                 VALUES (?1, ?2, ?3, ?4, 'plaid', ?5, ?6)",
             )?;
-            let mut update = tx.prepare("UPDATE transactions SET date = ?2, payee = ?3, amount_cents = ?4 WHERE id = ?1")?;
+            let mut update = tx.prepare(
+                "UPDATE transactions SET date = ?2, payee = ?3, amount_cents = ?4
+                 WHERE id = ?1 AND (date IS NOT ?2 OR payee IS NOT ?3 OR amount_cents IS NOT ?4)",
+            )?;
+            let mut set_pfc = tx.prepare("UPDATE transactions SET plaid_category = ?2 WHERE id = ?1")?;
             let mut remove = tx.prepare("DELETE FROM transactions WHERE source = 'plaid' AND import_id = ?1")?;
 
             for page in &pages {
@@ -515,18 +560,19 @@ impl Budget {
                     let import_id = format!("plaid:{}", t.transaction_id);
                     let payee = t.merchant_name.clone().filter(|m| !m.is_empty()).unwrap_or_else(|| t.name.clone());
                     let cents = -(t.amount * 100.0).round() as i64;
+                    let pfc = t.personal_finance_category.as_ref().map(|p| p.detailed.as_str()).filter(|d| !d.is_empty());
                     let existing: Option<i64> = find.query_row(params![account_id, import_id], |r| r.get(0)).optional()?;
                     match existing {
                         Some(id) => {
-                            update.execute(params![id, t.date, payee, cents])?;
-                            result.updated += 1;
+                            // Re-fetching unchanged history (after an upgrade) isn't news.
+                            result.updated += update.execute(params![id, t.date, payee, cents])?;
+                            if pfc.is_some() {
+                                set_pfc.execute(params![id, pfc])?;
+                            }
                         }
                         None => {
-                            insert.execute(params![account_id, t.date, payee, cents, import_id])?;
+                            insert.execute(params![account_id, t.date, payee, cents, import_id, pfc])?;
                             result.added += 1;
-                            if let Some(name) = t.personal_finance_category.as_ref().and_then(pfc_category_name) {
-                                pfc_guesses.push((tx.last_insert_rowid(), name));
-                            }
                         }
                     }
                 }
@@ -541,16 +587,33 @@ impl Budget {
         }
         tx.commit()?;
 
-        // Rules first; Plaid's guess only fills in what rules didn't.
+        // Transfers first, then the family's rules; Plaid's guess only fills in what's left.
+        result.auto_categorized += self.detect_transfers()?;
         result.auto_categorized += self.apply_rules()?;
-        for (id, name) in pfc_guesses {
-            result.auto_categorized += self.conn.execute(
-                "UPDATE transactions SET category_id = (SELECT id FROM categories WHERE name = ?2 AND hidden = 0 LIMIT 1)
-                 WHERE id = ?1 AND category_id IS NULL AND EXISTS (SELECT 1 FROM categories WHERE name = ?2 AND hidden = 0)",
-                params![id, name],
-            )?;
-        }
+        result.auto_categorized += self.apply_plaid_categories()?;
         Ok(result)
+    }
+
+    /// Give uncategorized bank transactions Plaid's category guess, where it maps to one of ours.
+    pub fn apply_plaid_categories(&self) -> Result<usize> {
+        let rows: Vec<(i64, String)> = self
+            .conn
+            .prepare("SELECT id, plaid_category FROM transactions WHERE category_id IS NULL AND plaid_category IS NOT NULL")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut n = 0;
+        for (id, detailed) in rows {
+            if let Some(name) = pfc_category_name(&detailed) {
+                n += self.conn.execute(
+                    "UPDATE transactions SET category_auto = 1,
+                         category_id = (SELECT id FROM categories WHERE name = ?2 AND hidden = 0 ORDER BY id LIMIT 1)
+                     WHERE id = ?1 AND category_id IS NULL
+                       AND EXISTS (SELECT 1 FROM categories WHERE name = ?2 AND hidden = 0)",
+                    params![id, name],
+                )?;
+            }
+        }
+        Ok(n)
     }
 }
 
@@ -592,6 +655,7 @@ mod tests {
             mask: Some(mask.into()),
             account_type: ty.into(),
             subtype: Some(sub.into()),
+            balances: None,
         }
     }
 
@@ -745,6 +809,50 @@ mod tests {
         b.delete_plaid_item(item).unwrap();
         assert!(b.list_plaid_items().unwrap().is_empty());
         assert_eq!(b.list_accounts().unwrap()[0].transaction_count, 1);
+    }
+
+    #[test]
+    fn balances_types_names_and_refetched_categories() {
+        let mut b = Budget::open_in_memory().unwrap();
+        let item = b.save_plaid_item("item-5", "SoFi").unwrap();
+        let mut robo = acct("robo", "SoFi Robo", "investment", "ira", "7426");
+        robo.balances = Some(PlaidBalances { current: Some(1234.56), available: None });
+        let mut card = acct("card", "Credit Card", "credit", "credit card", "3726");
+        card.balances = Some(PlaidBalances { current: Some(50.0), available: Some(950.0) });
+        let sav = acct("sav", "SoFi Savings", "depository", "savings", "4082");
+        // An account an older version created as checking.
+        let old = b.create_account("SoFi Robo ••7426", AccountKind::Checking).unwrap();
+        b.link_plaid_account(item, &robo, Some(old)).unwrap();
+
+        let mut pages = HashMap::new();
+        pages.insert(None, SyncPage {
+            added: vec![
+                txn("t1", "sav", 20.0, "2026-11-01", "COSTCO", Some("GENERAL_MERCHANDISE_SUPERSTORES")),
+                txn("t2", "sav", 9.0, "2026-11-02", "MYSTERY", None),
+            ],
+            next_cursor: "c1".into(),
+            ..Default::default()
+        });
+        let fake = FakePlaid { accounts: vec![robo.clone(), card, sav], pages, fail_once_with: RefCell::new(None) };
+        let r = b.sync_plaid_item(item, "tok", &fake).unwrap();
+        assert_eq!(r.new_accounts, vec!["SoFi Credit Card ••3726", "SoFi Savings ••4082"]);
+
+        let accounts = b.list_accounts().unwrap();
+        let find = |n: &str| accounts.iter().find(|a| a.name == n).unwrap().clone();
+        let robo_acct = find("SoFi Robo ••7426");
+        assert_eq!((robo_acct.kind, robo_acct.balance_cents, robo_acct.balance_from_bank), (AccountKind::Investment, 123_456, true));
+        assert_eq!(find("SoFi Credit Card ••3726").balance_cents, -5_000);
+        let s = find("SoFi Savings ••4082");
+        assert_eq!((s.balance_cents, s.balance_from_bank), (-2_900, false)); // no bank balance: sum of transactions
+
+        // After an upgrade the history is fetched again: nothing counts as changed, and
+        // Plaid's category is stored and used for what's still uncategorized.
+        b.conn.execute("UPDATE transactions SET plaid_category = NULL, category_id = NULL", []).unwrap();
+        b.conn.execute("UPDATE plaid_items SET cursor = NULL", []).unwrap();
+        let r = b.sync_plaid_item(item, "tok", &fake).unwrap();
+        assert_eq!((r.added, r.updated, r.auto_categorized), (0, 0, 1));
+        let t = b.list_transactions(&TransactionFilter { search: Some("COSTCO".into()), ..Default::default() }).unwrap();
+        assert_eq!(t[0].category_name.as_deref(), Some("Shopping"));
     }
 
     #[test]

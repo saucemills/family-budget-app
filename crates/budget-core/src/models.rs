@@ -7,6 +7,10 @@ pub enum AccountKind {
     Savings,
     CreditCard,
     Cash,
+    /// Brokerage, retirement, HSA: tracked for its balance, not budgeted.
+    Investment,
+    /// Car loan, mortgage, student loan.
+    Loan,
 }
 
 impl AccountKind {
@@ -16,6 +20,8 @@ impl AccountKind {
             AccountKind::Savings => "savings",
             AccountKind::CreditCard => "credit_card",
             AccountKind::Cash => "cash",
+            AccountKind::Investment => "investment",
+            AccountKind::Loan => "loan",
         }
     }
 
@@ -25,6 +31,8 @@ impl AccountKind {
             "savings" => AccountKind::Savings,
             "credit_card" => AccountKind::CreditCard,
             "cash" => AccountKind::Cash,
+            "investment" => AccountKind::Investment,
+            "loan" => AccountKind::Loan,
             _ => return None,
         })
     }
@@ -35,8 +43,13 @@ pub struct Account {
     pub id: i64,
     pub name: String,
     pub kind: AccountKind,
-    /// Sum of all transactions in the account, in cents.
+    /// The bank's own balance when the account syncs with a bank, otherwise the sum of
+    /// its transactions. In cents; negative for money owed (credit cards, loans).
     pub balance_cents: i64,
+    /// True when `balance_cents` came from the bank.
+    pub balance_from_bank: bool,
+    /// When the bank balance was last fetched (UTC, `YYYY-MM-DD HH:MM:SS`).
+    pub balance_as_of: Option<String>,
     pub transaction_count: i64,
 }
 
@@ -54,6 +67,9 @@ pub struct CategoryGroup {
     pub name: String,
     /// Income groups are where paychecks go; the Sankey uses them as sources.
     pub is_income: bool,
+    /// Transfer groups hold money moving between the family's own accounts. Plan and
+    /// Reflect leave them out, since that money wasn't earned or spent.
+    pub is_transfer: bool,
     pub sort_order: i64,
     pub categories: Vec<Category>,
 }
@@ -72,6 +88,10 @@ pub struct Transaction {
     pub category_id: Option<i64>,
     pub category_name: Option<String>,
     pub source: String,
+    /// The other side of a transfer, or the purchase a PayPal-style payment paid for.
+    pub linked_transaction_id: Option<i64>,
+    pub linked_payee: Option<String>,
+    pub linked_account_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

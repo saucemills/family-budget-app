@@ -63,7 +63,7 @@ impl Budget {
              FROM transactions t
              JOIN categories c ON c.id = t.category_id
              JOIN category_groups g ON g.id = c.group_id
-             WHERE t.date BETWEEN ?1 AND ?2
+             WHERE t.date BETWEEN ?1 AND ?2 AND g.is_transfer = 0
              GROUP BY c.id",
         )?;
         let rows = stmt.query_map([start, end], |r| {
@@ -121,7 +121,7 @@ impl Budget {
             .conn
             .prepare(
                 "SELECT g.id FROM category_groups g
-                 WHERE g.is_income = 0 AND EXISTS (
+                 WHERE g.is_income = 0 AND g.is_transfer = 0 AND EXISTS (
                      SELECT 1 FROM transactions t JOIN categories c ON c.id = t.category_id
                      WHERE c.group_id = g.id AND t.amount_cents < 0)
                  ORDER BY g.sort_order, g.id",
