@@ -247,6 +247,7 @@ impl Budget {
             }
         }
         tx.commit()?;
+        self.apply_rules()?;
         Ok(result)
     }
 }

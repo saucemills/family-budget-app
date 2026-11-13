@@ -10,6 +10,11 @@ pub enum Error {
     Invalid(String),
     #[error("not found: {0}")]
     NotFound(String),
+    /// An error response from Plaid. `code` is Plaid's error_code, e.g. ITEM_LOGIN_REQUIRED.
+    #[error("{message}")]
+    Plaid { code: String, message: String },
+    #[error("couldn't reach Plaid: {0}")]
+    Http(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

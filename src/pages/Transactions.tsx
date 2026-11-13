@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, Account, CategoryGroup, Transaction, errorText, formatMoney, parseMoney, today } from "../api";
+import { api, bankApi, describeSync, Account, CategoryGroup, Transaction, errorText, formatMoney, parseMoney, today } from "../api";
 import { CategorySelect, ConfirmButton, ErrorBanner } from "../components";
 
 export default function TransactionsPage() {
@@ -10,6 +10,10 @@ export default function TransactionsPage() {
   const [search, setSearch] = useState("");
   const [uncategorizedOnly, setUncategorizedOnly] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasBanks, setHasBanks] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [rulePrompt, setRulePrompt] = useState<{ text: string; categoryId: number; categoryName: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -30,11 +34,45 @@ export default function TransactionsPage() {
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => {
+    bankApi.listItems().then((i) => setHasBanks(i.length > 0)).catch(() => {});
+  }, []);
+
+  const syncBanks = async () => {
+    setSyncing(true);
+    try {
+      setNotice(describeSync(await bankApi.sync(null)));
+      await load();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const createRule = async () => {
+    if (!rulePrompt) return;
+    try {
+      const n = await bankApi.addRule(rulePrompt.text, rulePrompt.categoryId);
+      setNotice(
+        `Rule saved: payees containing "${rulePrompt.text}" go to ${rulePrompt.categoryName}.` +
+          (n ? ` It also categorized ${n} more transaction${n === 1 ? "" : "s"}.` : ""),
+      );
+      setRulePrompt(null);
+      await load();
+    } catch (e) {
+      setError(errorText(e));
+    }
+  };
 
   const setCategory = async (t: Transaction, categoryId: number | null) => {
     try {
       await api.setTransactionCategory(t.id, categoryId);
       await load();
+      if (categoryId != null) {
+        const name = groups.flatMap((g) => g.categories).find((c) => c.id === categoryId)?.name ?? "";
+        setRulePrompt({ text: await bankApi.suggestRuleText(t.payee), categoryId, categoryName: name });
+      }
     } catch (e) {
       setError(errorText(e));
     }
@@ -75,10 +113,28 @@ export default function TransactionsPage() {
           <input type="checkbox" checked={uncategorizedOnly} onChange={(e) => setUncategorizedOnly(e.target.checked)} />
           Only uncategorized
         </label>
+        {hasBanks && (
+          <button disabled={syncing} onClick={syncBanks}>
+            {syncing ? "Syncing…" : "Sync banks"}
+          </button>
+        )}
         <span className="muted">
           {txns.length} shown{uncategorizedCount > 0 && `, ${uncategorizedCount} need a category`}
         </span>
       </div>
+
+      {notice && <div className="notice">{notice}</div>}
+      {rulePrompt && (
+        <div className="notice rule-prompt">
+          Always put payees containing{" "}
+          <input value={rulePrompt.text} onChange={(e) => setRulePrompt({ ...rulePrompt, text: e.target.value })} /> in{" "}
+          <strong>{rulePrompt.categoryName}</strong>?{" "}
+          <button className="primary" onClick={createRule}>
+            Make it a rule
+          </button>{" "}
+          <button onClick={() => setRulePrompt(null)}>No thanks</button>
+        </div>
+      )}
 
       <table className="txns">
         <thead>

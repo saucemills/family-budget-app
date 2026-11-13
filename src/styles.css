@@ -178,3 +178,15 @@ tr.clickable { cursor: pointer; }
 .update-title { font-weight: 600; font-size: 13px; }
 .version { font-size: 11px; color: var(--muted); }
 .db-path { margin-top: 0; }
+
+/* ---------- bank sync ---------- */
+form.keys, .matcher { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 4px 16px 16px; margin: 12px 0; display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
+form.keys label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+form.keys input, form.keys select { font-size: 14px; color: var(--text); }
+.matcher { max-width: none; }
+.matcher table { border: none; }
+.row-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+ul.plain { list-style: none; padding: 0; margin: 0 0 8px; }
+ul.plain li { padding: 2px 0; }
+.small { font-size: 12px; }
+.rule-prompt input { width: 180px; padding: 3px 6px; }

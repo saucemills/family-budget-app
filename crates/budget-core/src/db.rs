@@ -58,6 +58,32 @@ CREATE TABLE budget_assignments (
     assigned_cents INTEGER NOT NULL,
     PRIMARY KEY (month, category_id)
 );
+"#, r#"
+-- Bank connections through Plaid. Access tokens are NOT stored here; the app keeps
+-- them in the operating system's credential store, keyed by item_id.
+CREATE TABLE plaid_items (
+    id               INTEGER PRIMARY KEY,
+    item_id          TEXT NOT NULL UNIQUE,
+    institution_name TEXT NOT NULL DEFAULT '',
+    cursor           TEXT,                     -- /transactions/sync position
+    last_synced_at   TEXT,
+    last_error       TEXT,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+ALTER TABLE accounts ADD COLUMN plaid_account_id TEXT;
+ALTER TABLE accounts ADD COLUMN plaid_item_id INTEGER REFERENCES plaid_items(id) ON DELETE SET NULL;
+-- Only bank transactions after this date are imported, so linking an account that
+-- already has CSV history doesn't create duplicates.
+ALTER TABLE accounts ADD COLUMN plaid_since TEXT;
+CREATE UNIQUE INDEX accounts_plaid_account ON accounts(plaid_account_id);
+
+-- Auto-categorize: a payee containing match_text goes to category_id.
+CREATE TABLE category_rules (
+    id          INTEGER PRIMARY KEY,
+    match_text  TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 "#];
 
 /// Starter categories, loosely shaped like a typical family's spending.

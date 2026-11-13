@@ -206,3 +206,100 @@ export const monthLabel = (month: string) => {
   const [y, m] = month.split("-").map(Number);
   return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 };
+
+// ---------- Bank sync (Plaid) and rules ----------
+
+export type PlaidEnv = "sandbox" | "production";
+
+export interface PlaidSettings {
+  configured: boolean;
+  env: PlaidEnv | null;
+  client_id_hint: string | null;
+}
+
+export interface PlaidAccount {
+  account_id: string;
+  name: string;
+  mask: string | null;
+  type: string;
+  subtype: string | null;
+}
+
+export interface PlaidItem {
+  id: number;
+  item_id: string;
+  institution_name: string;
+  last_synced_at: string | null;
+  last_error: string | null;
+  accounts: { id: number; name: string; plaid_since: string | null }[];
+}
+
+export interface NewConnection {
+  item: number;
+  institution_name: string;
+  accounts: PlaidAccount[];
+}
+
+export type PollResult =
+  | { status: "waiting" }
+  | { status: "exited" }
+  | { status: "completed"; connections: NewConnection[] };
+
+export interface SyncResult {
+  added: number;
+  updated: number;
+  removed: number;
+  skipped_old: number;
+  new_accounts: string[];
+  auto_categorized: number;
+}
+
+export interface ItemSync {
+  item: number;
+  institution_name: string;
+  result: SyncResult | null;
+  error: string | null;
+  needs_reconnect: boolean;
+}
+
+export interface Rule {
+  id: number;
+  match_text: string;
+  category_id: number;
+  category_name: string;
+}
+
+export const bankApi = {
+  getSettings: () => invoke<PlaidSettings>("plaid_get_settings"),
+  saveSettings: (clientId: string, secret: string, env: PlaidEnv) =>
+    invoke<void>("plaid_save_settings", { clientId, secret, env }),
+  listItems: () => invoke<PlaidItem[]>("plaid_list_items"),
+  connectStart: (item: number | null) => invoke<string>("plaid_connect_start", { item }),
+  connectPoll: (linkToken: string) => invoke<PollResult>("plaid_connect_poll", { linkToken }),
+  sandboxConnect: () => invoke<NewConnection>("plaid_sandbox_connect"),
+  linkAccounts: (item: number, choices: { account: PlaidAccount; existing_account_id: number | null }[]) =>
+    invoke<void>("plaid_link_accounts", { item, choices }),
+  sync: (item: number | null) => invoke<ItemSync[]>("plaid_sync", { item }),
+  disconnect: (item: number) => invoke<void>("plaid_disconnect", { item }),
+
+  listRules: () => invoke<Rule[]>("list_rules"),
+  addRule: (matchText: string, categoryId: number) => invoke<number>("add_rule", { matchText, categoryId }),
+  deleteRule: (id: number) => invoke<void>("delete_rule", { id }),
+  suggestRuleText: (payee: string) => invoke<string>("suggest_rule_text", { payee }),
+};
+
+export function describeSync(results: ItemSync[]): string {
+  if (results.length === 0) return "No banks connected yet.";
+  return results
+    .map((r) => {
+      if (r.error) return `${r.institution_name}: ${r.error}`;
+      const s = r.result!;
+      const parts = [`${s.added} new`];
+      if (s.updated) parts.push(`${s.updated} updated`);
+      if (s.removed) parts.push(`${s.removed} removed`);
+      if (s.auto_categorized) parts.push(`${s.auto_categorized} auto-categorized`);
+      if (s.new_accounts.length) parts.push(`new account${s.new_accounts.length > 1 ? "s" : ""}: ${s.new_accounts.join(", ")}`);
+      return `${r.institution_name}: ${parts.join(", ")}`;
+    })
+    .join(" · ");
+}
