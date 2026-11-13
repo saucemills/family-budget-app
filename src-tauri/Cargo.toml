@@ -1,0 +1,18 @@
+[package]
+name = "family-budget"
+version = "0.1.0"
+description = "A free, local budgeting app for the family"
+edition = "2024"
+
+[lib]
+name = "family_budget_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = "2.7.4"
+
+[dependencies]
+budget-core = { path = "../crates/budget-core" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tauri = "2.12.5"
