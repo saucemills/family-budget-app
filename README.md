@@ -52,7 +52,9 @@ Money moving between your own accounts isn't income or spending, so it goes to t
 Only transactions that are uncategorized, or that the app categorized itself, are matched.
 A category you pick is never changed, and picking a non-transfer category undoes a match.
 Rules ("payees containing TESLA go to Car Insurance") can be limited to an amount range, so
-one payee can go to different categories depending on the size of the charge.
+one payee can go to different categories depending on the size of the charge. A new rule
+also goes back through history: it fills in uncategorized transactions and replaces
+categories the app guessed, but never one you picked or a matched transfer.
 
 Payments to cards or loans that aren't connected are left for you to categorize, since
 they're the only record of that spending.
