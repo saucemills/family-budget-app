@@ -122,6 +122,8 @@ fn db_path(app: &tauri::AppHandle) -> CmdResult<std::path::PathBuf> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let path = db_path(app.handle())?;
             if let Some(dir) = path.parent() {

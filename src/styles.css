@@ -171,3 +171,10 @@ table.breakdown td { padding: 6px 10px; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
 .caret { display: inline-block; width: 14px; color: var(--muted); }
 tr.clickable { cursor: pointer; }
+
+/* ---------- updates ---------- */
+.update-box { margin-top: auto; padding: 8px 10px 0; }
+.update-available { background: var(--accent-soft); border-radius: 8px; padding: 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px; }
+.update-title { font-weight: 600; font-size: 13px; }
+.version { font-size: 11px; color: var(--muted); }
+.db-path { margin-top: 0; }
