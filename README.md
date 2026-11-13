@@ -38,10 +38,10 @@ signed with a paid code-signing certificate. Click **More info → Run anyway**.
 
 ### Publishing a new version
 
-1. Bump `"version"` in `package.json` (e.g. `0.2.0`) and merge it to `main`.
-2. Tag that commit and push the tag: `git tag v0.2.0 && git push origin v0.2.0`.
-3. The **Windows build** workflow builds the installer, signs the update, and publishes
-   the release. Installed copies pick it up the next time they open.
+Bump `"version"` in `package.json` (e.g. `0.3.0`) in a pull request and merge it. The
+**Windows build** workflow sees a version that hasn't been released yet, builds the
+installer, signs the update, and publishes release `v0.3.0`. Installed copies pick it up
+the next time they open. Merges that don't change the version don't publish anything.
 
 Updates are signed with a private key stored as the `TAURI_SIGNING_PRIVATE_KEY` repository
 secret; the matching public key is in `src-tauri/tauri.conf.json`. If the private key is

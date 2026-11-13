@@ -1,12 +1,15 @@
 # Builds the Windows installer.
 # - On a pull request: builds it to check nothing is broken (the installer is attached to the run).
-# - On a version tag like v0.2.0: builds it and publishes a GitHub Release with the installer
-#   and latest.json, which is what the app's "Update available" check reads.
+# - On main, when package.json has a version that hasn't been released yet: builds it and
+#   publishes release vX.Y.Z with the installer and latest.json, which is what the app's
+#   "Update available" check reads. So releasing = bumping the version in a merged PR.
+# - A pushed vX.Y.Z tag or a manual run also publishes, as a fallback.
 name: Windows build
 
 on:
   pull_request:
   push:
+    branches: [main]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -22,6 +25,27 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Decide whether this run publishes a release, and under which tag.
+      - name: Work out release tag
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v$version"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          elif gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "$tag is already released; building without publishing."
+            echo "tag=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Publishing $tag"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-node@v4
         with:
@@ -41,14 +65,15 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         with:
-          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
-          releaseName: Family Budget ${{ github.ref_name }}
+          tagName: ${{ steps.release.outputs.tag }}
+          releaseName: Family Budget ${{ steps.release.outputs.tag }}
+          releaseCommitish: ${{ github.sha }}
           releaseBody: Download the -setup.exe file below to install. If you already have the app, it will offer this update when you open it.
           releaseDraft: false
           includeUpdaterJson: true
 
       - name: Keep the installer from this run
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ steps.release.outputs.tag == '' }}
         uses: actions/upload-artifact@v4
         with:
           name: family-budget-windows-installer
