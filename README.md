@@ -5,8 +5,10 @@ computer and keeps all its data there, in a single SQLite file.
 
 Built with [Tauri](https://tauri.app) (a Rust backend with a React interface).
 
-## What works today (step 1)
+## What works today
 
+- **Plan:** a YNAB-style monthly budget. Money in income categories becomes "Ready to Assign"; you assign it to categories each month, see what's available, and leftovers roll forward. Overspending is taken out of next month's Ready to Assign. "Copy last month's amounts" fills in a new month quickly.
+- **Reflect:** "where did the money go" for any date range: totals for money in, out and left over, a Sankey diagram (income → groups → categories) with hover details, and a spending table you can expand by category.
 - **Accounts:** checking, savings, credit cards and cash, with running balances.
 - **Categories:** groups of categories (Food → Groceries, Restaurants, Coffee…), seeded with a starter set you can rename, hide or add to.
 - **Transactions:** add them by hand, search, filter by account or "needs a category", and categorize each one.
@@ -15,9 +17,10 @@ Built with [Tauri](https://tauri.app) (a Rust backend with a React interface).
 ## Roadmap
 
 1. ~~App setup, local database, CSV import~~
-2. **Plan** (YNAB-style monthly budget: give every dollar a job) and **Reflect** ("where did my money go", including a Sankey diagram of income → categories)
-3. Plaid bank syncing and auto-categorization rules
-4. Everyday polish: review queue, split transactions, backups, Windows installer
+2. ~~Plan and Reflect~~
+3. Windows installer with in-app updates
+4. Plaid bank syncing and auto-categorization rules
+5. Everyday polish: review queue, split transactions, backups
 
 ## Running it on Windows
 
@@ -55,6 +58,12 @@ Negative amounts are money going out, positive amounts are money coming in.
 
 ```sh
 cargo test -p budget-core
+```
+
+To try Plan and Reflect with three months of made-up family spending:
+
+```sh
+cargo run -p budget-core --example demo_data -- demo.sqlite
 ```
 
 To load a CSV into a budget file without opening the app:

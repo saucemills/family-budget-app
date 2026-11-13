@@ -4,10 +4,14 @@ import TransactionsPage from "./pages/Transactions";
 import AccountsPage from "./pages/Accounts";
 import CategoriesPage from "./pages/Categories";
 import ImportPage from "./pages/Import";
+import PlanPage from "./pages/Plan";
+import ReflectPage from "./pages/Reflect";
 
-type Page = "transactions" | "accounts" | "categories" | "import";
+type Page = "plan" | "reflect" | "transactions" | "accounts" | "categories" | "import";
 
 const NAV: { id: Page; label: string }[] = [
+  { id: "plan", label: "Plan" },
+  { id: "reflect", label: "Reflect" },
   { id: "transactions", label: "Transactions" },
   { id: "accounts", label: "Accounts" },
   { id: "categories", label: "Categories" },
@@ -15,7 +19,7 @@ const NAV: { id: Page; label: string }[] = [
 ];
 
 export default function App() {
-  const [page, setPage] = useState<Page>("transactions");
+  const [page, setPage] = useState<Page>("plan");
   const [dbPath, setDbPath] = useState("");
 
   useEffect(() => {
@@ -31,13 +35,6 @@ export default function App() {
             {n.label}
           </button>
         ))}
-        <div className="nav-section">Coming next</div>
-        <button className="nav" disabled title="Monthly budget: give every dollar a job">
-          Plan
-        </button>
-        <button className="nav" disabled title="Where did the money go?">
-          Reflect
-        </button>
         {dbPath && (
           <div className="db-path" title={dbPath}>
             Your data is saved on this computer at
@@ -47,6 +44,8 @@ export default function App() {
         )}
       </nav>
       <main className="content">
+        {page === "plan" && <PlanPage goToTransactions={() => setPage("transactions")} />}
+        {page === "reflect" && <ReflectPage goToTransactions={() => setPage("transactions")} />}
         {page === "transactions" && <TransactionsPage />}
         {page === "accounts" && <AccountsPage />}
         {page === "categories" && <CategoriesPage />}

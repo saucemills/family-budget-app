@@ -107,3 +107,67 @@ table.preview td, table.preview th { white-space: nowrap; font-size: 12px; }
 }
 .result { margin-top: 16px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
 .result div { margin-top: 10px; }
+
+/* ---------- chart palette (validated reference categorical order) ---------- */
+:root {
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+  --s-other: #a3a29b; --s-neutral: #8f8e88; --s-saved: #c9c8c1;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
+    --s-other: #6f6e69; --s-neutral: #7d7c76; --s-saved: #4a4945;
+  }
+}
+
+/* ---------- Plan ---------- */
+.plan-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.month-switch { display: flex; align-items: center; gap: 8px; }
+.month-switch h1 { margin: 0; min-width: 190px; text-align: center; }
+.month-switch button:not(.link) { width: 32px; height: 32px; padding: 0; font-size: 18px; line-height: 1; }
+button.link { border: none; background: none; color: var(--accent); padding: 0; text-decoration: underline; }
+.rta { padding: 10px 18px; border-radius: 10px; text-align: right; min-width: 200px; }
+.rta.positive { background: var(--accent-soft); }
+.rta.negative { background: var(--warn-bg); }
+.rta.zero { background: var(--panel); border: 1px solid var(--border); }
+.rta-amount { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.rta.positive .rta-amount { color: var(--accent); }
+.rta.negative .rta-amount { color: var(--out); }
+.rta-label { font-size: 12px; color: var(--muted); }
+.plan-sub { margin: 10px 0; }
+.notice { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--s4); padding: 8px 12px; border-radius: 6px; margin: 10px 0; }
+table.plan .group-row td, table.breakdown .group-row td { font-weight: 600; background: var(--bg); }
+td.cat-name { padding-left: 28px; }
+input.assign { width: 110px; text-align: right; font-variant-numeric: tabular-nums; border-color: transparent; background: transparent; }
+input.assign:hover, input.assign:focus { border-color: var(--border); background: var(--panel); }
+input.assign.bad { border-color: var(--out); }
+.pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-variant-numeric: tabular-nums; min-width: 80px; text-align: right; }
+.pill.positive { background: var(--accent-soft); color: var(--accent); }
+.pill.negative { background: var(--warn-bg); color: var(--out); font-weight: 600; }
+.pill.zero { color: var(--muted); }
+
+/* ---------- Reflect ---------- */
+.filters { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 8px 0 16px; }
+.chip { border-radius: 999px; padding: 5px 12px; }
+.chip.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tile { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.tile-label { font-size: 12px; color: var(--muted); }
+.tile-value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile-sub { font-size: 12px; color: var(--muted); }
+.sankey-wrap { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; overflow: hidden; }
+.sankey-link { stroke-opacity: 0.35; }
+.sankey-link:hover { stroke-opacity: 0.6; }
+.sankey-label { font-size: 12px; fill: var(--text); pointer-events: none; }
+.sankey-value { fill: var(--muted); }
+.tooltip { position: absolute; pointer-events: none; background: var(--text); color: var(--bg); padding: 6px 10px; border-radius: 6px; font-size: 12px; white-space: nowrap; z-index: 2; }
+table.breakdown td { padding: 6px 10px; }
+.bd-name { white-space: nowrap; width: 1%; }
+.bd-bar { width: 60%; }
+.bar { height: 12px; border-radius: 0 4px 4px 0; min-width: 2px; }
+.bar.sub { height: 8px; opacity: 0.7; }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+.caret { display: inline-block; width: 14px; color: var(--muted); }
+tr.clickable { cursor: pointer; }

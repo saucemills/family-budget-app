@@ -5,6 +5,8 @@ use std::sync::Mutex;
 
 use budget_core::import::{self, CsvMapping, CsvPreview, ImportResult};
 use budget_core::models::*;
+use budget_core::plan::MonthPlan;
+use budget_core::reflect::ReflectSummary;
 use budget_core::Budget;
 use tauri::{Manager, State};
 
@@ -88,6 +90,26 @@ fn import_csv(state: State<AppState>, account_id: i64, content: String, mapping:
 }
 
 #[tauri::command]
+fn get_month_plan(state: State<AppState>, month: String) -> CmdResult<MonthPlan> {
+    with(&state, |b| b.get_month_plan(&month))
+}
+
+#[tauri::command]
+fn set_assigned(state: State<AppState>, month: String, category_id: i64, cents: i64) -> CmdResult<()> {
+    with(&state, |b| b.set_assigned(&month, category_id, cents))
+}
+
+#[tauri::command]
+fn copy_previous_assignments(state: State<AppState>, month: String) -> CmdResult<usize> {
+    with(&state, |b| b.copy_previous_assignments(&month))
+}
+
+#[tauri::command]
+fn reflect(state: State<AppState>, start: String, end: String) -> CmdResult<ReflectSummary> {
+    with(&state, |b| b.reflect(&start, &end))
+}
+
+#[tauri::command]
 fn database_path(app: tauri::AppHandle) -> CmdResult<String> {
     Ok(db_path(&app)?.display().to_string())
 }
@@ -124,6 +146,10 @@ pub fn run() {
             delete_transaction,
             preview_csv,
             import_csv,
+            get_month_plan,
+            set_assigned,
+            copy_previous_assignments,
+            reflect,
             database_path,
         ])
         .run(tauri::generate_context!())
