@@ -58,7 +58,8 @@ export default function CategoriesPage() {
 
       <h2>Auto-categorize rules</h2>
       <p className="muted">
-        New transactions whose payee contains the text go to that category. Create one by categorizing a transaction and
+        Transactions whose payee contains the text go to that category, including past ones, unless you picked their
+        category yourself. Create one by categorizing a transaction and
         choosing "Make it a rule". A rule can be limited to an amount range, so one payee can go to different categories
         depending on the size of the charge.
       </p>

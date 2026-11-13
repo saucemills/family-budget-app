@@ -95,18 +95,51 @@ impl Budget {
                 return invalid("the smallest amount is bigger than the largest");
             }
         }
-        let updated = self.conn.execute(
+        let tx = self.conn.unchecked_transaction()?;
+        let updated = tx.execute(
             "UPDATE category_rules SET category_id = ?2
              WHERE match_text = ?1 AND min_cents IS ?3 AND max_cents IS ?4",
             params![text, category_id, min_cents, max_cents],
         )?;
         if updated == 0 {
-            self.conn.execute(
+            tx.execute(
                 "INSERT INTO category_rules (match_text, category_id, min_cents, max_cents) VALUES (?1, ?2, ?3, ?4)",
                 params![text, category_id, min_cents, max_cents],
             )?;
         }
-        self.apply_rules()
+        let rule_id: i64 = tx.query_row(
+            "SELECT id FROM category_rules WHERE match_text = ?1 AND min_cents IS ?2 AND max_cents IS ?3",
+            params![text, min_cents, max_cents],
+            |r| r.get(0),
+        )?;
+        // Reach back into history: past transactions the app categorized (a rule or Plaid's
+        // guess) are re-decided now that there's a new rule. Ones a person picked, and matched
+        // transfers, are left alone.
+        let before: Vec<(i64, Option<i64>)> = tx
+            .prepare(&format!(
+                "SELECT t.id, t.category_id FROM transactions t
+                 JOIN category_rules r ON r.id = ?1 AND {}
+                 WHERE (t.category_id IS NULL OR t.category_auto = 1) AND t.linked_transaction_id IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM categories c JOIN category_groups g ON g.id = c.group_id
+                                   WHERE c.id = t.category_id AND g.is_transfer = 1)",
+                RULE_MATCHES.replace("transactions.", "t.")
+            ))?
+            .query_map([rule_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (id, _) in &before {
+            tx.execute("UPDATE transactions SET category_id = NULL WHERE id = ?1", [id])?;
+        }
+        tx.commit()?;
+        self.apply_rules()?;
+        // Count the transactions whose category actually changed.
+        let mut changed = 0;
+        for (id, old) in before {
+            let now: Option<i64> = self.conn.query_row("SELECT category_id FROM transactions WHERE id = ?1", [id], |r| r.get(0))?;
+            if now != old {
+                changed += 1;
+            }
+        }
+        Ok(changed)
     }
 
     pub fn delete_rule(&self, id: i64) -> Result<()> {
@@ -165,12 +198,14 @@ mod tests {
         }
         assert_eq!(b.add_rule("STARBUCKS", id("Coffee")).unwrap(), 1); // the already-categorized one is left alone
         b.add_rule("amazon", id("Shopping")).unwrap();
-        b.add_rule("amazon fresh", id("Groceries")).unwrap(); // no-op: already categorized as Shopping
+        // A more specific rule re-decides what an earlier rule categorized.
+        assert_eq!(b.add_rule("amazon fresh", id("Groceries")).unwrap(), 1);
         let txns = b.list_transactions(&TransactionFilter::default()).unwrap();
         let cat_of = |p: &str| txns.iter().find(|t| t.payee == p).unwrap().category_name.clone().unwrap();
         assert_eq!(cat_of("Starbucks #12"), "Coffee");
         assert_eq!(cat_of("STARBUCKS #9"), "Restaurants");
-        assert_eq!(cat_of("AMAZON FRESH"), "Shopping");
+        assert_eq!(cat_of("AMAZON FRESH"), "Groceries");
+        assert_eq!(cat_of("AMAZON.COM"), "Shopping");
         assert_eq!(b.list_rules().unwrap().len(), 3);
 
         // Re-adding the same text (any case) updates instead of duplicating.
@@ -179,6 +214,32 @@ mod tests {
         assert_eq!(rules.len(), 3);
         assert!(rules.iter().any(|r| r.category_name == "Restaurants"));
         assert!(b.add_rule(" ", id("Coffee")).is_err());
+    }
+
+    #[test]
+    fn new_rules_reach_back_but_respect_people_and_transfers() {
+        let b = Budget::open_in_memory().unwrap();
+        let acct = b.create_account("Checking", AccountKind::Checking).unwrap();
+        let cats: Vec<_> = b.list_category_groups().unwrap().into_iter().flat_map(|g| g.categories).collect();
+        let id = |n: &str| cats.iter().find(|c| c.name == n).unwrap().id;
+        let add = |date: &str| {
+            b.add_transaction(&NewTransaction { account_id: acct, date: date.into(), payee: "USAA.COM PAYMNT".into(), amount_cents: -15_000, ..Default::default() })
+                .unwrap()
+        };
+        let (guessed, blank, mine, transfer) = (add("2026-01-01"), add("2026-02-01"), add("2026-03-01"), add("2026-04-01"));
+        // Plaid guessed Shopping; a person picked Gifts; one is a matched transfer.
+        b.conn.execute("UPDATE transactions SET category_id = ?2, category_auto = 1 WHERE id = ?1", params![guessed, id("Shopping")]).unwrap();
+        b.set_transaction_category(mine, Some(id("Gifts"))).unwrap();
+        b.conn.execute("UPDATE transactions SET category_id = ?2, category_auto = 1, linked_transaction_id = ?3 WHERE id = ?1", params![transfer, id("Between my accounts"), guessed]).unwrap();
+        b.conn.execute("UPDATE transactions SET linked_transaction_id = NULL WHERE id = ?1", [guessed]).unwrap();
+
+        assert_eq!(b.add_rule("USAA", id("Car Insurance")).unwrap(), 2);
+        let txns = b.list_transactions(&TransactionFilter::default()).unwrap();
+        let cat_of = |i: i64| txns.iter().find(|t| t.id == i).unwrap().category_name.clone().unwrap();
+        assert_eq!(cat_of(guessed), "Car Insurance");
+        assert_eq!(cat_of(blank), "Car Insurance");
+        assert_eq!(cat_of(mine), "Gifts");
+        assert_eq!(cat_of(transfer), "Between my accounts");
     }
 
     #[test]

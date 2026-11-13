@@ -75,7 +75,7 @@ export default function TransactionsPage() {
       const range = min != null || max != null ? ` (${describeRange(min && Math.abs(min), max && Math.abs(max))})` : "";
       setNotice(
         `Rule saved: payees containing "${rulePrompt.text}"${range} go to ${rulePrompt.categoryName}.` +
-          (n ? ` It also categorized ${n} more transaction${n === 1 ? "" : "s"}.` : ""),
+          (n ? ` It also updated ${n} past transaction${n === 1 ? "" : "s"}.` : ""),
       );
       setRulePrompt(null);
       await load();
