@@ -113,8 +113,48 @@ pub struct TransactionFilter {
     /// Only transactions with no category yet.
     #[serde(default)]
     pub uncategorized_only: bool,
+    /// Payee or memo contains this text; a number also matches the amount (either sign).
     #[serde(default)]
     pub search: Option<String>,
     #[serde(default)]
+    pub category_id: Option<i64>,
+    /// Every category in this group.
+    #[serde(default)]
+    pub group_id: Option<i64>,
+    #[serde(default)]
+    pub direction: Option<Direction>,
+    /// First day to include, `YYYY-MM-DD`.
+    #[serde(default)]
+    pub start: Option<String>,
+    /// Last day to include, `YYYY-MM-DD`.
+    #[serde(default)]
+    pub end: Option<String>,
+    #[serde(default)]
+    pub sort: Option<SortBy>,
+    /// Smallest / earliest / A first. Default is newest first.
+    #[serde(default)]
+    pub ascending: bool,
+    #[serde(default)]
     pub limit: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Direction {
+    /// Money out: purchases, bills.
+    Out,
+    /// Money in: paychecks, refunds, deposits.
+    In,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortBy {
+    #[default]
+    Date,
+    /// By size of the amount, so the biggest purchases and the biggest deposits sort together.
+    Amount,
+    Payee,
+    Category,
+    Account,
 }

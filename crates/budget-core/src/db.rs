@@ -331,8 +331,28 @@ impl Budget {
     }
 
     pub fn list_transactions(&self, f: &TransactionFilter) -> Result<Vec<Transaction>> {
-        let search = f.search.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{s}%"));
-        let mut stmt = self.conn.prepare(
+        let text = f.search.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let search = text.map(|s| format!("%{s}%"));
+        // "42.17" or "$1,200" also finds that amount, in or out.
+        let search_cents = text.and_then(|s| crate::money::parse_amount(s.trim_start_matches('-')).ok()).map(i64::abs);
+        for d in [&f.start, &f.end].into_iter().flatten() {
+            validate_date(d)?;
+        }
+        let direction = match f.direction {
+            Some(Direction::Out) => -1,
+            Some(Direction::In) => 1,
+            None => 0,
+        };
+        let dir = if f.ascending { "ASC" } else { "DESC" };
+        let order = match f.sort.unwrap_or_default() {
+            SortBy::Date => format!("t.date {dir}, t.id {dir}"),
+            SortBy::Amount => format!("abs(t.amount_cents) {dir}, t.date DESC, t.id DESC"),
+            SortBy::Payee => format!("t.payee COLLATE NOCASE {dir}, t.date DESC, t.id DESC"),
+            // Uncategorized sorts last either way.
+            SortBy::Category => format!("c.name IS NULL, c.name COLLATE NOCASE {dir}, t.date DESC, t.id DESC"),
+            SortBy::Account => format!("a.name COLLATE NOCASE {dir}, t.date DESC, t.id DESC"),
+        };
+        let mut stmt = self.conn.prepare(&format!(
             "SELECT t.id, t.account_id, a.name, t.date, t.payee, t.memo, t.amount_cents,
                     t.category_id, c.name, t.source, t.linked_transaction_id, l.payee, la.name
              FROM transactions t
@@ -342,12 +362,28 @@ impl Budget {
              LEFT JOIN accounts la ON la.id = l.account_id
              WHERE (?1 IS NULL OR t.account_id = ?1)
                AND (?2 = 0 OR t.category_id IS NULL)
-               AND (?3 IS NULL OR t.payee LIKE ?3 OR t.memo LIKE ?3)
-             ORDER BY t.date DESC, t.id DESC
-             LIMIT ?4",
-        )?;
+               AND (?3 IS NULL OR t.payee LIKE ?3 OR t.memo LIKE ?3 OR abs(t.amount_cents) IS ?5)
+               AND (?6 IS NULL OR t.category_id = ?6)
+               AND (?7 IS NULL OR c.group_id = ?7)
+               AND (?8 = 0 OR (?8 < 0 AND t.amount_cents < 0) OR (?8 > 0 AND t.amount_cents > 0))
+               AND (?9 IS NULL OR t.date >= ?9)
+               AND (?10 IS NULL OR t.date <= ?10)
+             ORDER BY {order}
+             LIMIT ?4"
+        ))?;
         let rows = stmt.query_map(
-            params![f.account_id, f.uncategorized_only, search, f.limit.unwrap_or(500)],
+            params![
+                f.account_id,
+                f.uncategorized_only,
+                search,
+                f.limit.unwrap_or(500),
+                search_cents,
+                f.category_id,
+                f.group_id,
+                direction,
+                f.start,
+                f.end
+            ],
             |r| {
                 Ok(Transaction {
                     id: r.get(0)?,
@@ -547,6 +583,42 @@ mod tests {
             .list_transactions(&TransactionFilter { search: Some("mark".into()), ..Default::default() })
             .unwrap();
         assert_eq!(found[0].category_name.as_deref(), Some("Farmers Market"));
+    }
+
+    #[test]
+    fn filters_and_sorting() {
+        let b = Budget::open_in_memory().unwrap();
+        let chk = b.create_account("Checking", AccountKind::Checking).unwrap();
+        let card = b.create_account("Amex", AccountKind::CreditCard).unwrap();
+        let cats: Vec<_> = b.list_category_groups().unwrap().into_iter().flat_map(|g| g.categories).collect();
+        let id = |n: &str| cats.iter().find(|c| c.name == n).unwrap().id;
+        let food_group = cats.iter().find(|c| c.name == "Groceries").unwrap().group_id;
+        for (acct, date, payee, cents, cat) in [
+            (chk, "2026-10-01", "Paycheck", 300_000, Some(id("Paycheck"))),
+            (card, "2026-10-05", "Safeway", -8_412, Some(id("Groceries"))),
+            (card, "2026-10-20", "Chipotle", -1_550, Some(id("Restaurants"))),
+            (chk, "2026-11-02", "Zelle refund", 1_550, None),
+            (chk, "2026-11-03", "Amazon", -4_217, Some(id("Shopping"))),
+        ] {
+            let t = b.add_transaction(&NewTransaction { account_id: acct, date: date.into(), payee: payee.into(), amount_cents: cents, ..Default::default() }).unwrap();
+            b.set_transaction_category(t, cat).unwrap();
+        }
+        let payees = |f: TransactionFilter| b.list_transactions(&f).unwrap().into_iter().map(|t| t.payee).collect::<Vec<_>>();
+
+        assert_eq!(payees(TransactionFilter { direction: Some(Direction::In), ..Default::default() }), ["Zelle refund", "Paycheck"]);
+        assert_eq!(payees(TransactionFilter { direction: Some(Direction::Out), start: Some("2026-10-10".into()), end: Some("2026-10-31".into()), ..Default::default() }), ["Chipotle"]);
+        assert_eq!(payees(TransactionFilter { group_id: Some(food_group), ..Default::default() }), ["Chipotle", "Safeway"]);
+        assert_eq!(payees(TransactionFilter { category_id: Some(id("Shopping")), ..Default::default() }), ["Amazon"]);
+        // A number finds the amount, in or out.
+        assert_eq!(payees(TransactionFilter { search: Some("$15.50".into()), ..Default::default() }), ["Zelle refund", "Chipotle"]);
+        assert_eq!(payees(TransactionFilter { search: Some("42.17".into()), ..Default::default() }), ["Amazon"]);
+        // Sorting.
+        assert_eq!(payees(TransactionFilter { sort: Some(SortBy::Amount), ..Default::default() })[0], "Paycheck");
+        assert_eq!(payees(TransactionFilter { sort: Some(SortBy::Payee), ascending: true, ..Default::default() })[0], "Amazon");
+        let by_cat = payees(TransactionFilter { sort: Some(SortBy::Category), ascending: true, ..Default::default() });
+        assert_eq!((by_cat[0].as_str(), by_cat[4].as_str()), ("Safeway", "Zelle refund")); // Groceries first, uncategorized last
+        assert_eq!(payees(TransactionFilter { sort: Some(SortBy::Date), ascending: true, ..Default::default() })[0], "Paycheck");
+        assert!(b.list_transactions(&TransactionFilter { start: Some("10/1/2026".into()), ..Default::default() }).is_err());
     }
 
     #[test]

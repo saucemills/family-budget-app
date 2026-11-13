@@ -67,10 +67,23 @@ export interface NewTransaction {
   category_id: number | null;
 }
 
+export type SortBy = "date" | "amount" | "payee" | "category" | "account";
+
 export interface TransactionFilter {
   account_id?: number | null;
   uncategorized_only?: boolean;
+  /** Payee or memo text; a number also matches the amount. */
   search?: string | null;
+  category_id?: number | null;
+  /** Every category in this group. */
+  group_id?: number | null;
+  /** "out" = money out, "in" = money in. */
+  direction?: "in" | "out" | null;
+  /** YYYY-MM-DD, inclusive. */
+  start?: string | null;
+  end?: string | null;
+  sort?: SortBy | null;
+  ascending?: boolean;
   limit?: number | null;
 }
 
