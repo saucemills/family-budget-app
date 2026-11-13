@@ -96,6 +96,11 @@ function GroupCard({ group, run }: { group: CategoryGroup; run: (f: () => Promis
       <h2>
         {group.name}
         {group.is_income && <span className="tag">Income</span>}
+        {group.is_transfer && (
+          <span className="tag" title="Money moving between your own accounts. Plan and Reflect leave it out.">
+            Not counted in Plan or Reflect
+          </span>
+        )}
       </h2>
       <ul>
         {group.categories.map((c) => (

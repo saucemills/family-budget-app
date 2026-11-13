@@ -10,6 +10,7 @@ pub mod plaid;
 pub mod plan;
 pub mod rules;
 pub mod reflect;
+pub mod transfers;
 
 pub use db::Budget;
 pub use error::{Error, Result};

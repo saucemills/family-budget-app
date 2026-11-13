@@ -84,6 +84,33 @@ CREATE TABLE category_rules (
     category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+"#, r#"
+-- Transfers between the family's own accounts aren't income or spending.
+ALTER TABLE category_groups ADD COLUMN is_transfer INTEGER NOT NULL DEFAULT 0;
+INSERT OR IGNORE INTO category_groups (name, is_income, sort_order) VALUES ('Transfers', 0, 1000);
+UPDATE category_groups SET is_transfer = 1 WHERE name = 'Transfers';
+INSERT OR IGNORE INTO categories (group_id, name, sort_order)
+    SELECT g.id, v.name, v.ord FROM category_groups g,
+        (SELECT 'Between my accounts' AS name, 0 AS ord
+         UNION ALL SELECT 'Credit card payment', 1
+         UNION ALL SELECT 'Loan payment', 2
+         UNION ALL SELECT 'Paid through another account', 3) v
+    WHERE g.name = 'Transfers';
+
+-- The balance the bank reports, for synced accounts.
+ALTER TABLE accounts ADD COLUMN bank_balance_cents INTEGER;
+ALTER TABLE accounts ADD COLUMN bank_balance_at TEXT;
+
+-- The other half of a transfer, or the purchase a PayPal-style payment paid for.
+ALTER TABLE transactions ADD COLUMN linked_transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL;
+-- Plaid's own category guess (personal_finance_category.detailed).
+ALTER TABLE transactions ADD COLUMN plaid_category TEXT;
+-- 1 when the app chose the category (rule, transfer match, Plaid's guess) rather than a person.
+-- The app may re-categorize these; it never touches ones a person picked.
+ALTER TABLE transactions ADD COLUMN category_auto INTEGER NOT NULL DEFAULT 0;
+UPDATE transactions SET category_auto = 1 WHERE source = 'plaid' AND category_id IS NOT NULL;
+-- Fetch every bank transaction once more so Plaid's categories get stored.
+UPDATE plaid_items SET cursor = NULL;
 "#];
 
 /// Starter categories, loosely shaped like a typical family's spending.
@@ -122,6 +149,7 @@ impl Budget {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         let mut budget = Budget { conn };
         budget.migrate()?;
+        budget.detect_transfers()?;
         Ok(budget)
     }
 
@@ -135,6 +163,9 @@ impl Budget {
         }
         if fresh {
             seed_categories(&tx)?;
+        }
+        if version < 4 {
+            tidy_bank_account_names(&tx)?;
         }
         tx.commit()?;
         Ok(())
@@ -156,7 +187,8 @@ impl Budget {
     pub fn list_accounts(&self) -> Result<Vec<Account>> {
         let mut stmt = self.conn.prepare(
             "SELECT a.id, a.name, a.kind,
-                    COALESCE(SUM(t.amount_cents), 0), COUNT(t.id)
+                    COALESCE(a.bank_balance_cents, SUM(t.amount_cents), 0), COUNT(t.id),
+                    a.bank_balance_cents IS NOT NULL, a.bank_balance_at
              FROM accounts a LEFT JOIN transactions t ON t.account_id = a.id
              WHERE a.closed = 0
              GROUP BY a.id ORDER BY a.name COLLATE NOCASE",
@@ -168,6 +200,8 @@ impl Budget {
                 name: r.get(1)?,
                 kind: AccountKind::parse(&kind).unwrap_or(AccountKind::Checking),
                 balance_cents: r.get(3)?,
+                balance_from_bank: r.get(5)?,
+                balance_as_of: r.get(6)?,
                 transaction_count: r.get(4)?,
             })
         })?;
@@ -187,13 +221,14 @@ impl Budget {
     pub fn list_category_groups(&self) -> Result<Vec<CategoryGroup>> {
         let mut groups: Vec<CategoryGroup> = self
             .conn
-            .prepare("SELECT id, name, is_income, sort_order FROM category_groups ORDER BY sort_order, id")?
+            .prepare("SELECT id, name, is_income, is_transfer, sort_order FROM category_groups ORDER BY sort_order, id")?
             .query_map([], |r| {
                 Ok(CategoryGroup {
                     id: r.get(0)?,
                     name: r.get(1)?,
                     is_income: r.get(2)?,
-                    sort_order: r.get(3)?,
+                    is_transfer: r.get(3)?,
+                    sort_order: r.get(4)?,
                     categories: Vec::new(),
                 })
             })?
@@ -280,10 +315,12 @@ impl Budget {
         let search = f.search.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(|s| format!("%{s}%"));
         let mut stmt = self.conn.prepare(
             "SELECT t.id, t.account_id, a.name, t.date, t.payee, t.memo, t.amount_cents,
-                    t.category_id, c.name, t.source
+                    t.category_id, c.name, t.source, t.linked_transaction_id, l.payee, la.name
              FROM transactions t
              JOIN accounts a ON a.id = t.account_id
              LEFT JOIN categories c ON c.id = t.category_id
+             LEFT JOIN transactions l ON l.id = t.linked_transaction_id
+             LEFT JOIN accounts la ON la.id = l.account_id
              WHERE (?1 IS NULL OR t.account_id = ?1)
                AND (?2 = 0 OR t.category_id IS NULL)
                AND (?3 IS NULL OR t.payee LIKE ?3 OR t.memo LIKE ?3)
@@ -304,19 +341,47 @@ impl Budget {
                     category_id: r.get(7)?,
                     category_name: r.get(8)?,
                     source: r.get(9)?,
+                    linked_transaction_id: r.get(10)?,
+                    linked_payee: r.get(11)?,
+                    linked_account_name: r.get(12)?,
                 })
             },
         )?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// A person picking a category. The app won't change it afterwards. Moving a matched
+    /// transfer out of the Transfers group also undoes the match.
     pub fn set_transaction_category(&self, id: i64, category_id: Option<i64>) -> Result<()> {
-        let n = self
-            .conn
-            .execute("UPDATE transactions SET category_id = ?2 WHERE id = ?1", params![id, category_id])?;
+        let n = self.conn.execute(
+            "UPDATE transactions SET category_id = ?2, category_auto = 0 WHERE id = ?1",
+            params![id, category_id],
+        )?;
         if n == 0 {
             return Err(Error::NotFound(format!("transaction {id}")));
         }
+        let still_transfer = match category_id {
+            Some(c) => self.conn.query_row(
+                "SELECT g.is_transfer FROM categories c JOIN category_groups g ON g.id = c.group_id WHERE c.id = ?1",
+                [c],
+                |r| r.get::<_, bool>(0),
+            )?,
+            None => false,
+        };
+        if !still_transfer {
+            self.unlink_transaction(id)?;
+        }
+        Ok(())
+    }
+
+    /// Undo a transfer or wallet match on both sides.
+    pub fn unlink_transaction(&self, id: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE transactions SET linked_transaction_id = NULL
+             WHERE linked_transaction_id = ?1
+                OR id = ?1",
+            [id],
+        )?;
         Ok(())
     }
 
@@ -332,6 +397,33 @@ impl Budget {
             .optional()?
             .is_some())
     }
+}
+
+/// Earlier versions named bank accounts "{institution} {account name}", which doubled up
+/// when the bank already starts its account names with its own name ("SoFi SoFi Savings").
+fn tidy_bank_account_names(conn: &Connection) -> Result<()> {
+    let rows: Vec<(i64, String, String)> = conn
+        .prepare(
+            "SELECT a.id, a.name, p.institution_name FROM accounts a JOIN plaid_items p ON p.id = a.plaid_item_id",
+        )?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (id, name, institution) in rows {
+        let inst = institution.trim();
+        if inst.is_empty() {
+            continue;
+        }
+        let doubled = format!("{inst} {inst}");
+        if let Some(rest) = name.strip_prefix(&doubled) {
+            let new_name = format!("{inst}{rest}");
+            // Leave it alone if the tidy name is already taken.
+            let taken = conn.query_row("SELECT 1 FROM accounts WHERE name = ?1", [&new_name], |_| Ok(())).optional()?.is_some();
+            if !taken {
+                conn.execute("UPDATE accounts SET name = ?2 WHERE id = ?1", params![id, new_name])?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn seed_categories(conn: &Connection) -> Result<()> {
@@ -374,8 +466,11 @@ mod tests {
     fn fresh_budget_has_starter_categories() {
         let b = Budget::open_in_memory().unwrap();
         let groups = b.list_category_groups().unwrap();
-        assert_eq!(groups.len(), DEFAULT_CATEGORIES.len());
+        assert_eq!(groups.len(), DEFAULT_CATEGORIES.len() + 1);
         assert!(groups[0].is_income);
+        let transfers = groups.last().unwrap();
+        assert!(transfers.is_transfer && transfers.name == "Transfers");
+        assert_eq!(transfers.categories.len(), 4);
         assert!(groups.iter().any(|g| g.categories.iter().any(|c| c.name == "Groceries")));
     }
 
@@ -389,7 +484,7 @@ mod tests {
         }
         let b = Budget::open(&path).unwrap();
         assert_eq!(b.list_accounts().unwrap().len(), 1);
-        assert_eq!(b.list_category_groups().unwrap().len(), DEFAULT_CATEGORIES.len());
+        assert_eq!(b.list_category_groups().unwrap().len(), DEFAULT_CATEGORIES.len() + 1);
     }
 
     #[test]

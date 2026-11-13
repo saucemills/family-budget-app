@@ -1,13 +1,15 @@
 // Typed wrappers around the Rust commands in src-tauri/src/lib.rs.
 import { invoke } from "@tauri-apps/api/core";
 
-export type AccountKind = "checking" | "savings" | "credit_card" | "cash";
+export type AccountKind = "checking" | "savings" | "credit_card" | "cash" | "investment" | "loan";
 
 export const ACCOUNT_KINDS: { value: AccountKind; label: string }[] = [
   { value: "checking", label: "Checking" },
   { value: "savings", label: "Savings" },
   { value: "credit_card", label: "Credit card" },
   { value: "cash", label: "Cash" },
+  { value: "investment", label: "Investment" },
+  { value: "loan", label: "Loan" },
 ];
 
 export interface Account {
@@ -15,6 +17,10 @@ export interface Account {
   name: string;
   kind: AccountKind;
   balance_cents: number;
+  /** True when the balance is the bank's own figure (synced accounts). */
+  balance_from_bank: boolean;
+  /** UTC "YYYY-MM-DD HH:MM:SS" of the last bank balance. */
+  balance_as_of: string | null;
   transaction_count: number;
 }
 
@@ -29,6 +35,8 @@ export interface CategoryGroup {
   id: number;
   name: string;
   is_income: boolean;
+  /** Money moving between your own accounts; Plan and Reflect leave it out. */
+  is_transfer: boolean;
   sort_order: number;
   categories: Category[];
 }
@@ -44,6 +52,10 @@ export interface Transaction {
   category_id: number | null;
   category_name: string | null;
   source: string;
+  /** The other half of a transfer, or the purchase a PayPal payment paid for. */
+  linked_transaction_id: number | null;
+  linked_payee: string | null;
+  linked_account_name: string | null;
 }
 
 export interface NewTransaction {

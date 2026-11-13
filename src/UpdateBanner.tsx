@@ -1,30 +1,63 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 
+/** How often to look for a new version while the app stays open. */
+const RECHECK_MS = 4 * 60 * 60 * 1000;
+
+type CheckState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "up_to_date"; at: Date }
+  | { kind: "failed"; message: string };
+
 /**
- * Checks GitHub Releases for a newer version when the app opens, and offers a
- * one-click install. Updates are signed; the app refuses any that aren't.
- * Your budget file lives outside the app folder, so updating never touches it.
+ * Looks for a newer version on GitHub Releases when the app opens, every few hours,
+ * and whenever "Check for updates" is clicked, then offers a one-click install.
+ * Updates are signed; the app refuses any that aren't. Your budget file lives outside
+ * the app folder, so updating never touches it.
  */
 export default function UpdateBanner() {
   const [version, setVersion] = useState("");
   const [update, setUpdate] = useState<Update | null>(null);
-  const [status, setStatus] = useState<"idle" | "downloading" | "error">("idle");
+  const [checkState, setCheckState] = useState<CheckState>({ kind: "idle" });
+  const [install, setInstall] = useState<"idle" | "downloading" | "error">("idle");
   const [progress, setProgress] = useState<number | null>(null);
+  const busy = useRef(false);
+
+  const runCheck = useCallback(async (manual: boolean) => {
+    if (busy.current) return;
+    busy.current = true;
+    if (manual) setCheckState({ kind: "checking" });
+    try {
+      const u = await check();
+      if (u) {
+        setUpdate(u);
+        setCheckState({ kind: "idle" });
+      } else {
+        setCheckState({ kind: "up_to_date", at: new Date() });
+      }
+    } catch (e) {
+      // Automatic checks fail quietly (no internet, or running from source);
+      // a click always gets an answer.
+      console.info("Update check failed:", e);
+      if (manual) setCheckState({ kind: "failed", message: String(e) });
+    } finally {
+      busy.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     getVersion().then(setVersion).catch(() => {});
-    // In development (npm run tauri dev) there's nothing to update to; ignore errors quietly.
-    check()
-      .then((u) => u && setUpdate(u))
-      .catch((e) => console.info("Update check skipped:", e));
-  }, []);
+    runCheck(false);
+    const timer = window.setInterval(() => runCheck(false), RECHECK_MS);
+    return () => window.clearInterval(timer);
+  }, [runCheck]);
 
-  const install = async () => {
+  const installUpdate = async () => {
     if (!update) return;
-    setStatus("downloading");
+    setInstall("downloading");
     let total = 0;
     let done = 0;
     try {
@@ -38,24 +71,43 @@ export default function UpdateBanner() {
       await relaunch();
     } catch (e) {
       console.error(e);
-      setStatus("error");
+      setInstall("error");
     }
   };
 
   return (
     <div className="update-box">
-      {update && (
+      {update ? (
         <div className="update-available">
           <div className="update-title">Version {update.version} is available</div>
-          {status === "idle" && (
-            <button className="primary" onClick={install}>
+          {install === "idle" && (
+            <button className="primary" onClick={installUpdate}>
               Update and restart
             </button>
           )}
-          {status === "downloading" && <div className="muted">Downloading{progress != null ? ` ${progress}%` : "…"}</div>}
-          {status === "error" && (
+          {install === "downloading" && <div className="muted">Downloading{progress != null ? ` ${progress}%` : "…"}</div>}
+          {install === "error" && (
             <div className="muted">
-              The update didn't install. <button className="link" onClick={install}>Try again</button>
+              The update didn't install.{" "}
+              <button className="link" onClick={installUpdate}>
+                Try again
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="update-check">
+          <button className="link" onClick={() => runCheck(true)} disabled={checkState.kind === "checking"}>
+            {checkState.kind === "checking" ? "Checking for updates…" : "Check for updates"}
+          </button>
+          {checkState.kind === "up_to_date" && (
+            <div className="muted">
+              You're up to date{version ? ` (version ${version})` : ""}. Checked {checkState.at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.
+            </div>
+          )}
+          {checkState.kind === "failed" && (
+            <div className="muted" title={checkState.message}>
+              Couldn't check for updates. Are you online? <span className="detail">{checkState.message}</span>
             </div>
           )}
         </div>

@@ -77,7 +77,13 @@ export default function AccountsPage() {
               <td>{a.name}</td>
               <td>{kindLabel(a.kind)}</td>
               <td className="num">{a.transaction_count}</td>
-              <td className={a.balance_cents < 0 ? "num out" : "num"}>{formatMoney(a.balance_cents)}</td>
+              <td
+                className={a.balance_cents < 0 ? "num out" : "num"}
+                title={a.balance_from_bank ? `From your bank${a.balance_as_of ? `, ${localTime(a.balance_as_of)}` : ""}` : "Sum of transactions in the app"}
+              >
+                {formatMoney(a.balance_cents)}
+                {a.balance_from_bank && <div className="memo">from bank</div>}
+              </td>
               <td>
                 <ConfirmButton
                   label="Delete"
@@ -106,9 +112,16 @@ export default function AccountsPage() {
         )}
       </table>
       <p className="muted">
-        Balances are the sum of transactions in the app. If you start mid-way through an account's history, add one
-        "Starting balance" transaction so the balance matches your bank.
+        Accounts connected under Bank sync show the balance your bank reports, updated each sync. Other accounts show
+        the sum of their transactions; if you start mid-way through one's history, add a "Starting balance"
+        transaction so it matches your bank.
       </p>
     </div>
   );
+}
+
+/** "2026-11-13 18:02:11" (UTC) to the computer's local date and time. */
+function localTime(utc: string): string {
+  const d = new Date(utc.replace(" ", "T") + "Z");
+  return isNaN(d.getTime()) ? utc : d.toLocaleString();
 }

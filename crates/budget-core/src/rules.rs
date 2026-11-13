@@ -82,7 +82,7 @@ impl Budget {
     /// Categorize every uncategorized transaction that a rule matches.
     pub fn apply_rules(&self) -> Result<usize> {
         Ok(self.conn.execute(
-            "UPDATE transactions SET category_id = (
+            "UPDATE transactions SET category_auto = 1, category_id = (
                  SELECT r.category_id FROM category_rules r
                  WHERE instr(upper(transactions.payee), upper(r.match_text)) > 0
                  ORDER BY length(r.match_text) DESC LIMIT 1)

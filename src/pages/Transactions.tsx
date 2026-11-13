@@ -155,6 +155,11 @@ export default function TransactionsPage() {
               <td>
                 {t.payee}
                 {t.memo && <div className="memo">{t.memo}</div>}
+                {t.linked_transaction_id != null && (
+                  <div className="memo linked" title="Matched automatically. Pick a non-transfer category to undo the match.">
+                    ↔ {t.linked_account_name}: {t.linked_payee}
+                  </div>
+                )}
               </td>
               <td>
                 <CategorySelect groups={groups} value={t.category_id} onChange={(id) => setCategory(t, id)} />
