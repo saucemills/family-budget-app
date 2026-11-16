@@ -42,6 +42,8 @@ function groupColorMap(order: number[]): Map<number, string> {
 interface Drill {
   title: string;
   filter: Pick<TransactionFilter, "category_id" | "group_id" | "account_id">;
+  /** List several groups together (the chart's folded "smaller groups"). */
+  groupIds?: number[];
 }
 
 export default function ReflectPage({ goToTransactions }: { goToTransactions: () => void }) {
@@ -230,7 +232,17 @@ function buildGraph(data: ReflectSummary, colors: Map<number, string>, transferG
   if (smallGroups.length === 1) bigGroups.push(smallGroups.pop()!);
   if (smallGroups.length > 1) {
     const total = smallGroups.reduce((s, g) => s + g.amount_cents, 0);
-    nodes.push({ id: "small-groups", label: `${smallGroups.length} smaller groups`, color: "var(--s-other)", column: 2 });
+    nodes.push({
+      id: "small-groups",
+      label: `${smallGroups.length} smaller groups`,
+      color: "var(--s-other)",
+      column: 2,
+      drill: {
+        title: smallGroups.map((g) => g.name).join(", "),
+        filter: {},
+        groupIds: smallGroups.map((g) => g.group_id),
+      },
+    });
     links.push({ source: "hub", target: "small-groups", value: total, color: "var(--s-other)" });
   }
   for (const g of bigGroups) {
@@ -454,8 +466,13 @@ function DrillList({ drill, range, onClose }: { drill: Drill; range: [string, st
 
   useEffect(() => {
     setTxns(null);
-    api
-      .listTransactions({ ...drill.filter, start: range[0], end: range[1], limit: 5000 })
+    const base = { start: range[0], end: range[1], limit: 5000 };
+    const load = drill.groupIds
+      ? Promise.all(drill.groupIds.map((g) => api.listTransactions({ ...base, group_id: g }))).then((lists) =>
+          lists.flat().sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id),
+        )
+      : api.listTransactions({ ...drill.filter, ...base });
+    load
       .then((t) => {
         setTxns(t);
         setError(null);
