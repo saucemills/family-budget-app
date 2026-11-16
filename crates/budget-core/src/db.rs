@@ -169,6 +169,7 @@ impl Budget {
         let mut budget = Budget { conn };
         budget.migrate()?;
         budget.detect_transfers()?;
+        budget.apply_rules()?;
         Ok(budget)
     }
 

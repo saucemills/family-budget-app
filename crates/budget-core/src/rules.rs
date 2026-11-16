@@ -107,39 +107,8 @@ impl Budget {
                 params![text, category_id, min_cents, max_cents],
             )?;
         }
-        let rule_id: i64 = tx.query_row(
-            "SELECT id FROM category_rules WHERE match_text = ?1 AND min_cents IS ?2 AND max_cents IS ?3",
-            params![text, min_cents, max_cents],
-            |r| r.get(0),
-        )?;
-        // Reach back into history: past transactions the app categorized (a rule or Plaid's
-        // guess) are re-decided now that there's a new rule. Ones a person picked, and matched
-        // transfers, are left alone.
-        let before: Vec<(i64, Option<i64>)> = tx
-            .prepare(&format!(
-                "SELECT t.id, t.category_id FROM transactions t
-                 JOIN category_rules r ON r.id = ?1 AND {}
-                 WHERE (t.category_id IS NULL OR t.category_auto = 1) AND t.linked_transaction_id IS NULL
-                   AND NOT EXISTS (SELECT 1 FROM categories c JOIN category_groups g ON g.id = c.group_id
-                                   WHERE c.id = t.category_id AND g.is_transfer = 1)",
-                RULE_MATCHES.replace("transactions.", "t.")
-            ))?
-            .query_map([rule_id], |r| Ok((r.get(0)?, r.get(1)?)))?
-            .collect::<rusqlite::Result<_>>()?;
-        for (id, _) in &before {
-            tx.execute("UPDATE transactions SET category_id = NULL WHERE id = ?1", [id])?;
-        }
         tx.commit()?;
-        self.apply_rules()?;
-        // Count the transactions whose category actually changed.
-        let mut changed = 0;
-        for (id, old) in before {
-            let now: Option<i64> = self.conn.query_row("SELECT category_id FROM transactions WHERE id = ?1", [id], |r| r.get(0))?;
-            if now != old {
-                changed += 1;
-            }
-        }
-        Ok(changed)
+        self.apply_rules()
     }
 
     pub fn delete_rule(&self, id: i64) -> Result<()> {
@@ -147,16 +116,26 @@ impl Budget {
         Ok(())
     }
 
-    /// Categorize every uncategorized transaction that a rule matches. A rule with an
-    /// amount range beats one without; then the longest text wins.
+    /// Categorize transactions that a rule matches: uncategorized ones, and ones the app
+    /// categorized itself (an older rule or Plaid's guess), so the family's rules always win
+    /// over guesses, past and future. Categories a person picked and matched transfers are
+    /// never touched. A rule with an amount range beats one without; then the longest text
+    /// wins. Returns how many transactions changed category.
     pub fn apply_rules(&self) -> Result<usize> {
+        let best = format!(
+            "(SELECT r.category_id FROM category_rules r WHERE {RULE_MATCHES}
+              ORDER BY (r.min_cents IS NOT NULL OR r.max_cents IS NOT NULL) DESC, length(r.match_text) DESC, r.id
+              LIMIT 1)"
+        );
         Ok(self.conn.execute(
             &format!(
-                "UPDATE transactions SET category_auto = 1, category_id = (
-                     SELECT r.category_id FROM category_rules r WHERE {RULE_MATCHES}
-                     ORDER BY (r.min_cents IS NOT NULL OR r.max_cents IS NOT NULL) DESC, length(r.match_text) DESC, r.id
-                     LIMIT 1)
-                 WHERE category_id IS NULL AND EXISTS (SELECT 1 FROM category_rules r WHERE {RULE_MATCHES})"
+                "UPDATE transactions SET category_auto = 1, category_id = {best}
+                 WHERE (category_id IS NULL
+                        OR (category_auto = 1 AND linked_transaction_id IS NULL
+                            AND NOT EXISTS (SELECT 1 FROM categories c JOIN category_groups g ON g.id = c.group_id
+                                            WHERE c.id = transactions.category_id AND g.is_transfer = 1)))
+                   AND EXISTS (SELECT 1 FROM category_rules r WHERE {RULE_MATCHES})
+                   AND category_id IS NOT {best}"
             ),
             [],
         )?)
@@ -240,6 +219,24 @@ mod tests {
         assert_eq!(cat_of(blank), "Car Insurance");
         assert_eq!(cat_of(mine), "Gifts");
         assert_eq!(cat_of(transfer), "Between my accounts");
+    }
+
+    #[test]
+    fn existing_rules_replace_plaid_guesses() {
+        let b = Budget::open_in_memory().unwrap();
+        let acct = b.create_account("Checking", AccountKind::Checking).unwrap();
+        let cats: Vec<_> = b.list_category_groups().unwrap().into_iter().flat_map(|g| g.categories).collect();
+        let id = |n: &str| cats.iter().find(|c| c.name == n).unwrap().id;
+        b.add_rule("Pamten", id("Paycheck")).unwrap();
+        let t = b
+            .add_transaction(&NewTransaction { account_id: acct, date: "2026-10-16".into(), payee: "Electronic Deposit Pamten Inc".into(), amount_cents: 537_891, ..Default::default() })
+            .unwrap();
+        // Plaid guessed Other Income after the rule existed.
+        b.conn.execute("UPDATE transactions SET category_id = ?2, category_auto = 1 WHERE id = ?1", params![t, id("Other Income")]).unwrap();
+        assert_eq!(b.apply_rules().unwrap(), 1);
+        assert_eq!(b.apply_rules().unwrap(), 0); // nothing left to change
+        let got = b.list_transactions(&TransactionFilter::default()).unwrap();
+        assert_eq!(got[0].category_name.as_deref(), Some("Paycheck"));
     }
 
     #[test]

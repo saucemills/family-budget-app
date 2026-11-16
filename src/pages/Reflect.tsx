@@ -60,7 +60,9 @@ export default function ReflectPage({ goToTransactions }: { goToTransactions: ()
     setRange(presetRange(p));
   };
 
-  const net = data ? data.income_cents - data.spending_cents : 0;
+  // What's left after spending and after what was moved to savings. Money taken out of
+  // savings counts as coming in.
+  const net = data ? data.income_cents + data.from_savings_cents - data.spending_cents - data.saved_cents : 0;
   const rate = data && data.income_cents > 0 ? Math.round((net / data.income_cents) * 100) : null;
 
   return (
@@ -89,6 +91,17 @@ export default function ReflectPage({ goToTransactions }: { goToTransactions: ()
               <div className="tile-label">Went out</div>
               <div className="tile-value">{formatMoney(data.spending_cents)}</div>
             </div>
+            {(data.saved_cents > 0 || data.from_savings_cents > 0) && (
+              <div className="tile">
+                <div className="tile-label">{data.saved_cents >= data.from_savings_cents ? "Moved to savings" : "Taken from savings"}</div>
+                <div className="tile-value">{formatMoney(Math.abs(data.saved_cents - data.from_savings_cents))}</div>
+                {data.saved_cents > 0 && data.from_savings_cents > 0 && (
+                  <div className="tile-sub">
+                    {formatMoney(data.saved_cents)} in, {formatMoney(data.from_savings_cents)} out
+                  </div>
+                )}
+              </div>
+            )}
             <div className="tile">
               <div className="tile-label">{net >= 0 ? "Left over" : "Spent more than came in"}</div>
               <div className="tile-value">{formatMoney(Math.abs(net))}</div>
@@ -106,7 +119,7 @@ export default function ReflectPage({ goToTransactions }: { goToTransactions: ()
             </div>
           )}
 
-          {data.income_cents === 0 && data.spending_cents === 0 ? (
+          {data.income_cents === 0 && data.spending_cents === 0 && data.saved_cents === 0 ? (
             <p className="empty">No categorized transactions in this date range yet.</p>
           ) : (
             <>
@@ -114,6 +127,28 @@ export default function ReflectPage({ goToTransactions }: { goToTransactions: ()
               <SankeyChart data={data} colors={colors} />
               <h2>Spending by category</h2>
               <Breakdown data={data} colors={colors} />
+              {data.saved_to.length > 0 && (
+                <>
+                  <h2>Moved to savings</h2>
+                  <table className="breakdown">
+                    <tbody>
+                      {data.saved_to.map((s) => (
+                        <tr key={s.account_id}>
+                          <td>
+                            <span className="swatch" style={{ background: "var(--s-saved)" }} />
+                            {s.name}
+                          </td>
+                          <td className="num">{formatMoney(s.amount_cents)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="muted">
+                    Transfers into savings and investment accounts, minus anything moved back out. They aren't counted as
+                    spending.
+                  </p>
+                </>
+              )}
             </>
           )}
         </>
@@ -143,15 +178,22 @@ function buildGraph(data: ReflectSummary, colors: Map<number, string>) {
   const nodes: NodeExtra[] = [];
   const links: { source: string; target: string; value: number; color: string }[] = [];
   const neutral = "var(--s-neutral)";
-  const hubTotal = Math.max(data.income_cents, data.spending_cents);
+  const savedColor = "var(--s-saved)";
+  const inflow = data.income_cents + data.from_savings_cents;
+  const outflow = data.spending_cents + data.saved_cents;
+  const hubTotal = Math.max(inflow, outflow);
 
   for (const s of data.income_sources) {
     nodes.push({ id: `inc-${s.category_id}`, label: s.name, color: neutral, column: 0 });
     links.push({ source: `inc-${s.category_id}`, target: "hub", value: s.amount_cents, color: neutral });
   }
-  if (data.spending_cents > data.income_cents) {
-    nodes.push({ id: "from-savings", label: "From savings / other", color: neutral, column: 0 });
-    links.push({ source: "from-savings", target: "hub", value: data.spending_cents - data.income_cents, color: neutral });
+  if (data.from_savings_cents > 0) {
+    nodes.push({ id: "from-savings", label: "From savings", color: neutral, column: 0 });
+    links.push({ source: "from-savings", target: "hub", value: data.from_savings_cents, color: neutral });
+  }
+  if (outflow > inflow) {
+    nodes.push({ id: "from-other", label: "From balances / other", color: neutral, column: 0 });
+    links.push({ source: "from-other", target: "hub", value: outflow - inflow, color: neutral });
   }
   nodes.push({ id: "hub", label: data.income_cents > 0 ? "Income" : "Spending", color: neutral, column: 1 });
 
@@ -181,9 +223,17 @@ function buildGraph(data: ReflectSummary, colors: Map<number, string>) {
       links.push({ source: gid, target: `rest-${g.group_id}`, value: rest, color });
     }
   }
-  if (data.income_cents > data.spending_cents) {
-    nodes.push({ id: "saved", label: "Left over", color: "var(--s-saved)", column: 2 });
-    links.push({ source: "hub", target: "saved", value: data.income_cents - data.spending_cents, color: "var(--s-saved)" });
+  if (data.saved_cents > 0) {
+    nodes.push({ id: "to-savings", label: "Savings", color: savedColor, column: 2 });
+    links.push({ source: "hub", target: "to-savings", value: data.saved_cents, color: savedColor });
+    for (const s of data.saved_to) {
+      nodes.push({ id: `sav-${s.account_id}`, label: s.name, color: savedColor, column: 3 });
+      links.push({ source: "to-savings", target: `sav-${s.account_id}`, value: s.amount_cents, color: savedColor });
+    }
+  }
+  if (inflow > outflow) {
+    nodes.push({ id: "left-over", label: "Left over", color: savedColor, column: 2 });
+    links.push({ source: "hub", target: "left-over", value: inflow - outflow, color: savedColor });
   }
   return { nodes, links, hubTotal };
 }
