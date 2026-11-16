@@ -203,6 +203,11 @@ export interface ReflectSummary {
   }[];
   uncategorized_count: number;
   uncategorized_out_cents: number;
+  /** Money moved into savings / investment accounts, largest first. */
+  saved_to: { account_id: number; name: string; amount_cents: number }[];
+  saved_cents: number;
+  /** Net money taken back out of savings (positive). */
+  from_savings_cents: number;
   color_order: number[];
 }
 
