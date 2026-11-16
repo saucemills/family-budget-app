@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { sankey, sankeyLinkHorizontal, SankeyGraph } from "d3-sankey";
-import { planApi, ReflectSummary, errorText, formatMoney, isoDate } from "../api";
+import { api, planApi, ReflectSummary, Transaction, TransactionFilter, errorText, formatMoney, isoDate } from "../api";
 import { ErrorBanner } from "../components";
 
 type Preset = "this_month" | "last_month" | "last_3" | "ytd" | "last_12";
@@ -38,11 +38,26 @@ function groupColorMap(order: number[]): Map<number, string> {
   return map;
 }
 
+/** A slice of the chart or table to list transactions for. */
+interface Drill {
+  title: string;
+  filter: Pick<TransactionFilter, "category_id" | "group_id" | "account_id">;
+}
+
 export default function ReflectPage({ goToTransactions }: { goToTransactions: () => void }) {
   const [preset, setPreset] = useState<Preset | null>("this_month");
   const [range, setRange] = useState<[string, string]>(presetRange("this_month"));
   const [data, setData] = useState<ReflectSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [drill, setDrill] = useState<Drill | null>(null);
+  const [transferGroupId, setTransferGroupId] = useState<number | null>(null);
+
+  useEffect(() => {
+    api
+      .listCategoryGroups()
+      .then((g) => setTransferGroupId(g.find((x) => x.is_transfer)?.id ?? null))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     planApi
@@ -50,6 +65,7 @@ export default function ReflectPage({ goToTransactions }: { goToTransactions: ()
       .then((d) => {
         setData(d);
         setError(null);
+        setDrill(null);
       })
       .catch((e) => setError(errorText(e)));
   }, [range]);
@@ -124,16 +140,25 @@ export default function ReflectPage({ goToTransactions }: { goToTransactions: ()
           ) : (
             <>
               <h2>Money flow</h2>
-              <SankeyChart data={data} colors={colors} />
+              <p className="muted hint">Click any part of the chart or a row below to see its transactions.</p>
+              <SankeyChart data={data} colors={colors} transferGroupId={transferGroupId} onDrill={setDrill} />
+              {drill && <DrillList drill={drill} range={range} onClose={() => setDrill(null)} />}
               <h2>Spending by category</h2>
-              <Breakdown data={data} colors={colors} />
+              <Breakdown data={data} colors={colors} onDrill={setDrill} />
               {data.saved_to.length > 0 && (
                 <>
                   <h2>Moved to savings</h2>
                   <table className="breakdown">
                     <tbody>
                       {data.saved_to.map((s) => (
-                        <tr key={s.account_id}>
+                        <tr
+                          key={s.account_id}
+                          className={transferGroupId != null ? "clickable" : undefined}
+                          onClick={() =>
+                            transferGroupId != null &&
+                            setDrill({ title: `Moved to ${s.name}`, filter: { account_id: s.account_id, group_id: transferGroupId } })
+                          }
+                        >
                           <td>
                             <span className="swatch" style={{ background: "var(--s-saved)" }} />
                             {s.name}
@@ -164,6 +189,8 @@ interface NodeExtra {
   label: string;
   color: string;
   column: number;
+  /** What clicking it lists; none for nodes that mix several things. */
+  drill?: Drill;
 }
 interface LinkExtra {
   color: string;
@@ -174,7 +201,7 @@ const MAX_CATS_PER_GROUP = 6;
  *  in the chart so it stays readable; the table below still lists every one. */
 const FOLD_SHARE = 0.025;
 
-function buildGraph(data: ReflectSummary, colors: Map<number, string>) {
+function buildGraph(data: ReflectSummary, colors: Map<number, string>, transferGroupId: number | null) {
   const nodes: NodeExtra[] = [];
   const links: { source: string; target: string; value: number; color: string }[] = [];
   const neutral = "var(--s-neutral)";
@@ -184,7 +211,7 @@ function buildGraph(data: ReflectSummary, colors: Map<number, string>) {
   const hubTotal = Math.max(inflow, outflow);
 
   for (const s of data.income_sources) {
-    nodes.push({ id: `inc-${s.category_id}`, label: s.name, color: neutral, column: 0 });
+    nodes.push({ id: `inc-${s.category_id}`, label: s.name, color: neutral, column: 0, drill: { title: s.name, filter: { category_id: s.category_id } } });
     links.push({ source: `inc-${s.category_id}`, target: "hub", value: s.amount_cents, color: neutral });
   }
   if (data.from_savings_cents > 0) {
@@ -209,17 +236,17 @@ function buildGraph(data: ReflectSummary, colors: Map<number, string>) {
   for (const g of bigGroups) {
     const color = colors.get(g.group_id) ?? "var(--s-other)";
     const gid = `grp-${g.group_id}`;
-    nodes.push({ id: gid, label: g.name, color, column: 2 });
+    nodes.push({ id: gid, label: g.name, color, column: 2, drill: { title: g.name, filter: { group_id: g.group_id } } });
     links.push({ source: "hub", target: gid, value: g.amount_cents, color });
     let shown = g.categories.slice(0, MAX_CATS_PER_GROUP).filter((c) => c.amount_cents >= small);
     if (shown.length === g.categories.length - 1) shown = g.categories.slice(); // don't fold a lone category
     const rest = g.amount_cents - shown.reduce((s, c) => s + c.amount_cents, 0);
     for (const c of shown) {
-      nodes.push({ id: `cat-${c.category_id}`, label: c.name, color, column: 3 });
+      nodes.push({ id: `cat-${c.category_id}`, label: c.name, color, column: 3, drill: { title: `${g.name}: ${c.name}`, filter: { category_id: c.category_id } } });
       links.push({ source: gid, target: `cat-${c.category_id}`, value: c.amount_cents, color });
     }
     if (rest > 0) {
-      nodes.push({ id: `rest-${g.group_id}`, label: shown.length ? `Other ${g.name}` : g.name, color, column: 3 });
+      nodes.push({ id: `rest-${g.group_id}`, label: shown.length ? `Other ${g.name}` : g.name, color, column: 3, drill: { title: g.name, filter: { group_id: g.group_id } } });
       links.push({ source: gid, target: `rest-${g.group_id}`, value: rest, color });
     }
   }
@@ -227,7 +254,13 @@ function buildGraph(data: ReflectSummary, colors: Map<number, string>) {
     nodes.push({ id: "to-savings", label: "Savings", color: savedColor, column: 2 });
     links.push({ source: "hub", target: "to-savings", value: data.saved_cents, color: savedColor });
     for (const s of data.saved_to) {
-      nodes.push({ id: `sav-${s.account_id}`, label: s.name, color: savedColor, column: 3 });
+      nodes.push({
+        id: `sav-${s.account_id}`,
+        label: s.name,
+        color: savedColor,
+        column: 3,
+        drill: transferGroupId != null ? { title: `Moved to ${s.name}`, filter: { account_id: s.account_id, group_id: transferGroupId } } : undefined,
+      });
       links.push({ source: "to-savings", target: `sav-${s.account_id}`, value: s.amount_cents, color: savedColor });
     }
   }
@@ -238,7 +271,17 @@ function buildGraph(data: ReflectSummary, colors: Map<number, string>) {
   return { nodes, links, hubTotal };
 }
 
-function SankeyChart({ data, colors }: { data: ReflectSummary; colors: Map<number, string> }) {
+function SankeyChart({
+  data,
+  colors,
+  transferGroupId,
+  onDrill,
+}: {
+  data: ReflectSummary;
+  colors: Map<number, string>;
+  transferGroupId: number | null;
+  onDrill: (d: Drill) => void;
+}) {
   const wrap = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(900);
   const [hover, setHover] = useState<{ x: number; y: number; text: string } | null>(null);
@@ -251,7 +294,7 @@ function SankeyChart({ data, colors }: { data: ReflectSummary; colors: Map<numbe
   }, []);
 
   const { graph, hubTotal, height } = useMemo(() => {
-    const { nodes, links, hubTotal } = buildGraph(data, colors);
+    const { nodes, links, hubTotal } = buildGraph(data, colors, transferGroupId);
     const leafCount = Math.max(
       nodes.filter((n) => n.column === 3).length,
       nodes.filter((n) => n.column === 0).length,
@@ -272,7 +315,7 @@ function SankeyChart({ data, colors }: { data: ReflectSummary; colors: Map<numbe
       links: links.map((l) => ({ ...l })),
     });
     return { graph, hubTotal, height };
-  }, [data, colors, width]);
+  }, [data, colors, width, transferGroupId]);
 
   // Leave room for labels: they sit right of each node, except the last column (left of it).
   const pct = (v: number) => (hubTotal > 0 ? ` (${Math.round((v / hubTotal) * 100)}%)` : "");
@@ -291,7 +334,8 @@ function SankeyChart({ data, colors }: { data: ReflectSummary; colors: Map<numbe
             return (
               <path
                 key={i}
-                className="sankey-link"
+                className={t.drill ? "sankey-link clickable" : "sankey-link"}
+                onClick={() => t.drill && onDrill(t.drill)}
                 d={sankeyLinkHorizontal()(l) ?? undefined}
                 style={{ stroke: (l as LinkExtra).color }}
                 strokeWidth={Math.max(1, l.width ?? 1)}
@@ -308,7 +352,12 @@ function SankeyChart({ data, colors }: { data: ReflectSummary; colors: Map<numbe
           const last = n.column === 3 || (n.column === 2 && !graph.nodes.some((m) => m.column === 3));
           const h = y1 - y0;
           return (
-            <g key={n.id} onMouseMove={(e) => show(e, `${n.label}: ${formatMoney(n.value ?? 0)}${pct(n.value ?? 0)}`)}>
+            <g
+              key={n.id}
+              className={n.drill ? "clickable" : undefined}
+              onClick={() => n.drill && onDrill(n.drill)}
+              onMouseMove={(e) => show(e, `${n.label}: ${formatMoney(n.value ?? 0)}${pct(n.value ?? 0)}`)}
+            >
               <rect x={x0} y={y0} width={x1 - x0} height={Math.max(1, h)} rx={2} style={{ fill: n.color }} />
               {h >= 9 && (
                 <text
@@ -336,7 +385,7 @@ function SankeyChart({ data, colors }: { data: ReflectSummary; colors: Map<numbe
 
 // ---------- Breakdown table (also the chart's table view) ----------
 
-function Breakdown({ data, colors }: { data: ReflectSummary; colors: Map<number, string> }) {
+function Breakdown({ data, colors, onDrill }: { data: ReflectSummary; colors: Map<number, string>; onDrill: (d: Drill) => void }) {
   const [open, setOpen] = useState<Set<number>>(new Set());
   const max = Math.max(1, ...data.spending_groups.map((g) => g.amount_cents));
   const toggle = (id: number) => {
@@ -349,9 +398,18 @@ function Breakdown({ data, colors }: { data: ReflectSummary; colors: Map<number,
       <tbody>
         {data.spending_groups.map((g) => (
           <Fragment key={g.group_id}>
-            <tr className="group-row clickable" onClick={() => toggle(g.group_id)}>
+            <tr className="group-row clickable" onClick={() => onDrill({ title: g.name, filter: { group_id: g.group_id } })}>
               <td className="bd-name">
-                <span className="caret">{open.has(g.group_id) ? "▾" : "▸"}</span>
+                <span
+                  className="caret"
+                  title={open.has(g.group_id) ? "Hide categories" : "Show categories"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggle(g.group_id);
+                  }}
+                >
+                  {open.has(g.group_id) ? "▾" : "▸"}
+                </span>
                 <span className="swatch" style={{ background: colors.get(g.group_id) ?? "var(--s-other)" }} />
                 {g.name}
               </td>
@@ -365,7 +423,11 @@ function Breakdown({ data, colors }: { data: ReflectSummary; colors: Map<number,
             </tr>
             {open.has(g.group_id) &&
               g.categories.map((c) => (
-                <tr key={`c${c.category_id}`}>
+                <tr
+                  key={`c${c.category_id}`}
+                  className="clickable"
+                  onClick={() => onDrill({ title: `${g.name}: ${c.name}`, filter: { category_id: c.category_id } })}
+                >
                   <td className="cat-name">{c.name}</td>
                   <td className="bd-bar">
                     <div className="bar sub" style={{ width: `${(c.amount_cents / max) * 100}%`, background: colors.get(g.group_id) ?? "var(--s-other)" }} />
@@ -380,5 +442,80 @@ function Breakdown({ data, colors }: { data: ReflectSummary; colors: Map<number,
         ))}
       </tbody>
     </table>
+  );
+}
+
+// ---------- Transactions behind a slice ----------
+
+function DrillList({ drill, range, onClose }: { drill: Drill; range: [string, string]; onClose: () => void }) {
+  const [txns, setTxns] = useState<Transaction[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setTxns(null);
+    api
+      .listTransactions({ ...drill.filter, start: range[0], end: range[1], limit: 5000 })
+      .then((t) => {
+        setTxns(t);
+        setError(null);
+      })
+      .catch((e) => setError(errorText(e)));
+  }, [drill, range]);
+
+  useEffect(() => {
+    box.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [drill]);
+
+  const total = (txns ?? []).reduce((s, t) => s + t.amount_cents, 0);
+  return (
+    <div className="drill" ref={box}>
+      <div className="drill-head">
+        <h3>{drill.title}</h3>
+        <span className="muted">
+          {range[0]} to {range[1]}
+          {txns && ` · ${txns.length} transaction${txns.length === 1 ? "" : "s"} · ${formatMoney(Math.abs(total))} ${total < 0 ? "out" : "in"}`}
+        </span>
+        <button className="link" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <ErrorBanner error={error} />
+      {txns == null ? (
+        <p className="muted">Loading…</p>
+      ) : txns.length === 0 ? (
+        <p className="empty">No transactions.</p>
+      ) : (
+        <table className="txns compact">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Account</th>
+              <th>Payee</th>
+              <th>Category</th>
+              <th className="num">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            {txns.map((t) => (
+              <tr key={t.id}>
+                <td className="date">{t.date}</td>
+                <td>{t.account_name}</td>
+                <td>
+                  {t.payee}
+                  {t.linked_transaction_id != null && (
+                    <div className="memo linked">
+                      ↔ {t.linked_account_name}: {t.linked_payee}
+                    </div>
+                  )}
+                </td>
+                <td>{t.category_name}</td>
+                <td className={t.amount_cents < 0 ? "num out" : "num in"}>{formatMoney(t.amount_cents)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }

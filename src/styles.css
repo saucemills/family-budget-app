@@ -199,3 +199,14 @@ ul.plain li { padding: 2px 0; }
 .rule-prompt input { width: 180px; padding: 3px 6px; }
 .rule-prompt input.amount { width: 80px; }
 .rule-prompt label.check { margin-left: 6px; }
+
+/* ---------- Reflect drill-down ---------- */
+.clickable { cursor: pointer; }
+.sankey-link.clickable:hover { stroke-opacity: 0.6; }
+tr.clickable:hover td { background: var(--accent-soft); }
+.hint { margin: -4px 0 8px; font-size: 12px; }
+.drill { border: 1px solid var(--border, #ddd); border-radius: 8px; padding: 12px 14px; margin: 12px 0 20px; background: var(--panel, #fff); }
+.drill-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.drill-head h3 { margin: 0; font-size: 15px; }
+.drill-head .link { margin-left: auto; }
+table.compact td { padding-top: 6px; padding-bottom: 6px; }
